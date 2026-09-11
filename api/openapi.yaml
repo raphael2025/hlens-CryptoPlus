@@ -1,0 +1,932 @@
+openapi: 3.1.0
+info:
+  title: hlens API
+  version: 1.0.0
+  description: |
+    The perp positioning prism. Public read endpoints need no auth. Field conventions:
+    snake_case; `ts` = unix ms; `*_usd` = float USD; `*_share` = 0..1; funding rates as decimals (0.0001 = 0.01%).
+    Every aggregate carries `as_of` and `sources`; missing data is `null`, never 0.
+servers:
+  - url: https://api.hlens.xyz/v1
+tags: [market, funding, liquidations, whales, events, options, system, me]
+
+paths:
+  /coins:
+    get:
+      tags: [market]
+      summary: List coins with prism summary (screener)
+      x-hlens-cache: 60
+      parameters:
+        - { name: preset, in: query, schema: { type: string, enum: [crowded_short, crowded_long, retail_vs_whale, oi_surge, paid_to_hold, whale_flip, healthy_pullback, squeeze] } }
+        - { name: sort, in: query, schema: { type: string, example: "-crowding" } }
+        - { name: cols, in: query, schema: { type: string, description: comma list of extra columns } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 500, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          content: { application/json: { schema: { $ref: "#/components/schemas/CoinList" } } }
+  /coins/{symbol}/prism:
+    get:
+      tags: [market]
+      summary: Full prism for one coin
+      x-hlens-cache: 10
+      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Prism" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /coins/{symbol}/context:
+    get:
+      tags: [market]
+      summary: Market context (state, key levels, last 24h, drivers, calendar)
+      x-hlens-cache: 60
+      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Context" } } } }
+  /coins/{symbol}/levels:
+    get:
+      tags: [market]
+      summary: Price ladder — liquidation clusters, whale liquidation prices, real 24h liquidations
+      x-hlens-cache: 60
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: range_pct, in: query, schema: { type: number, default: 15 } }
+        - { name: lev_weights, in: query, schema: { type: string, description: "e.g. 10:0.4,25:0.3,50:0.2,100:0.1" } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Levels" } } } }
+  /coins/{symbol}/history:
+    get:
+      tags: [market]
+      summary: Time series of prism fields
+      x-hlens-cache: 60
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: fields, in: query, required: true, schema: { type: string, example: "price,crowding,funding_8h,oi_total_usd" } }
+        - { name: interval, in: query, schema: { type: string, enum: [1m, 5m, 15m, 1h, 4h, 1d], default: 1h } }
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+  /coins/{symbol}/state-history:
+    get:
+      tags: [market]
+      summary: Hourly state labels for the state strip
+      x-hlens-cache: 300
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: days, in: query, schema: { type: integer, default: 30, maximum: 365 } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/StateHistory" } } } }
+  /coins/{symbol}/snapshot:
+    get:
+      tags: [market]
+      summary: Prism + sentence as it was at a past time (replay)
+      x-hlens-cache: 3600
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: at, in: query, required: true, schema: { type: integer, description: unix ms } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+  /market/breadth:
+    get:
+      tags: [market]
+      summary: Market breadth over top 100 coins
+      x-hlens-cache: 300
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Breadth" } } } }
+  /insights:
+    get:
+      tags: [market]
+      summary: Home page sentence and question cards
+      x-hlens-cache: 60
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Insights" } } } }
+
+  /funding:
+    get:
+      tags: [funding]
+      summary: Funding matrix, all coins × venues
+      x-hlens-cache: 60
+      parameters:
+        - { name: sort, in: query, schema: { type: string, default: "-abs_apr" } }
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/FundingRow" } } } } }
+  /funding/{symbol}/history:
+    get:
+      tags: [funding]
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/FundingHistory" } } } }
+  /funding/arb:
+    get:
+      tags: [funding]
+      summary: Cross-venue funding spreads with fee-adjusted APR (heuristic)
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ArbRow" } } } } }
+  /oi/{symbol}/history:
+    get:
+      tags: [funding]
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: interval, in: query, schema: { type: string, enum: [5m, 1h, 1d], default: 1h } }
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+  /ls/{symbol}:
+    get:
+      tags: [funding]
+      summary: Long/short ratios by venue and kind
+      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/LSRatio" } } } } }
+
+  /liquidations/recent:
+    get:
+      tags: [liquidations]
+      parameters:
+        - { name: symbol, in: query, schema: { type: string } }
+        - { name: min_usd, in: query, schema: { type: number, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 500 } }
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Liquidation" } } } } }
+  /liquidations/agg:
+    get:
+      tags: [liquidations]
+      parameters:
+        - { name: window, in: query, schema: { type: string, enum: [1h, 4h, 24h], default: 24h } }
+        - { name: group_by, in: query, schema: { type: string, enum: [symbol, venue, side], default: symbol } }
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/LiqAggRow" } } } } }
+  /liquidations/heatmap/{symbol}:
+    get:
+      tags: [liquidations]
+      summary: Model-estimated liquidation density grid (labelled model, not real)
+      parameters:
+        - { $ref: "#/components/parameters/Symbol" }
+        - { name: days, in: query, schema: { type: integer, enum: [7, 30], default: 7 } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Heatmap" } } } }
+  /liquidations/cascades:
+    get:
+      tags: [liquidations]
+      parameters: [ { $ref: "#/components/parameters/From" }, { $ref: "#/components/parameters/To" } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Cascade" } } } } }
+
+  /whales:
+    get:
+      tags: [whales]
+      summary: Tracked wallets
+      parameters:
+        - { name: sort, in: query, schema: { type: string, enum: [account_value, pnl_30d, roi_30d, hit_rate], default: account_value } }
+        - { name: source, in: query, schema: { type: string, enum: [hyperliquid, okx, all], default: all } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WalletList" } } } }
+  /whales/{address}:
+    get:
+      tags: [whales]
+      parameters: [ { $ref: "#/components/parameters/Address" } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WalletDetail" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /whales/{address}/fills:
+    get:
+      tags: [whales]
+      parameters:
+        - { $ref: "#/components/parameters/Address" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/FillList" } } } }
+  /whales/positions:
+    get:
+      tags: [whales]
+      summary: Largest open positions across tracked wallets
+      parameters:
+        - { name: symbol, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [notional, liq_distance_pct, upnl], default: notional } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } } } } }
+  /whales/events:
+    get:
+      tags: [whales]
+      parameters:
+        - { name: symbol, in: query, schema: { type: string } }
+        - { name: types, in: query, schema: { type: string, description: "comma list of WhaleEventType" } }
+        - { name: min_usd, in: query, schema: { type: number, default: 0 } }
+        - { name: address, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/From" }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WhaleEventList" } } } }
+  /whales/by-coin:
+    get:
+      tags: [whales]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WhaleCoinAgg" } } } } }
+  /whales/boards:
+    get:
+      tags: [whales]
+      summary: Bets / rekt-soon / capitulation / winners-losers boards in one call
+      x-hlens-cache: 30
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WhaleBoards" } } } }
+
+  /events:
+    get:
+      tags: [events]
+      summary: Market event timeline ("what did I miss")
+      parameters:
+        - { name: since, in: query, required: true, schema: { type: integer } }
+        - { name: until, in: query, schema: { type: integer } }
+        - { name: types, in: query, schema: { type: string, description: "price,liq,funding,whale,crowd,state" } }
+        - { name: symbol, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 500 } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+  /scorecard:
+    get:
+      tags: [events]
+      summary: Forward-return statistics for states, whale events and OI quadrants
+      x-hlens-cache: 3600
+      parameters:
+        - { name: window, in: query, schema: { type: string, enum: [30d, 90d, 365d], default: 90d } }
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Scorecard" } } } }
+  /calendar:
+    get:
+      tags: [events]
+      parameters: [ { name: days, in: query, schema: { type: integer, default: 7 } } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } } } } }
+
+  /options/{currency}/summary:
+    get:
+      tags: [options]
+      parameters: [ { name: currency, in: path, required: true, schema: { type: string, enum: [BTC, ETH] } } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/OptionsSummary" } } } }
+  /basis:
+    get:
+      tags: [options]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/BasisRow" } } } } }
+  /macro:
+    get:
+      tags: [options]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Macro" } } } }
+
+  /status:
+    get:
+      tags: [system]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+
+  /me:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+  /me/positions:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MyPosition" } } } } }
+    post:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MyPositionInput" } } } }
+      responses:
+        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/MyPosition" } } } }
+  /me/positions/{id}:
+    delete:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "204": { description: deleted } }
+  /me/watchlist:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Watchlist" } } } }
+    post:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WatchItem" } } } }
+      responses: { "201": { description: added } }
+  /me/alerts:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlertRule" } } } } }
+    post:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleInput" } } } }
+      responses:
+        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } }
+        "402": { description: plan limit reached }
+  /me/alerts/{id}:
+    patch:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleInput" } } } }
+      responses: { "200": { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } } }
+    delete:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "204": { description: deleted } }
+  /me/alerts/deliveries:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlertDelivery" } } } } }
+  /me/api-keys:
+    get:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } } } } }
+    post:
+      tags: [me]
+      security: [ { bearer: [] } ]
+      responses:
+        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/ApiKeyCreated" } } } }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    Symbol: { name: symbol, in: path, required: true, schema: { type: string, example: BTC } }
+    Address: { name: address, in: path, required: true, schema: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" } }
+    From: { name: from, in: query, schema: { type: integer, description: unix ms } }
+    To: { name: to, in: query, schema: { type: integer, description: unix ms } }
+  responses:
+    NotFound:
+      description: not found
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+        request_id: { type: string }
+
+    EvidenceTag:
+      type: string
+      enum: [verified, self_validated, heuristic, opinion]
+    Sentence:
+      type: object
+      required: [zh, en, template_id, tags]
+      properties:
+        zh: { type: string }
+        en: { type: string }
+        template_id: { type: string, example: S.UP_HEALTHY_PB }
+        tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } }
+        contradiction: { type: object, nullable: true, properties: { zh: { type: string }, en: { type: string }, template_id: { type: string } } }
+
+    SourceStatus:
+      type: object
+      additionalProperties: { type: string, enum: [ok, stale, error] }
+
+    Venue:
+      type: string
+      enum: [binance, bybit, okx, gate, bitget, hyperliquid]
+
+    VenueRow:
+      type: object
+      required: [venue, ok]
+      properties:
+        venue: { $ref: "#/components/schemas/Venue" }
+        ok: { type: boolean }
+        price: { type: number, nullable: true }
+        funding: { type: number, nullable: true, description: raw rate per interval }
+        funding_interval_h: { type: integer, nullable: true }
+        funding_8h: { type: number, nullable: true }
+        funding_apr_pct: { type: number, nullable: true }
+        next_funding_ts: { type: integer, nullable: true }
+        oi_usd: { type: number, nullable: true }
+        vol24h_usd: { type: number, nullable: true }
+        retail_long_share: { type: number, nullable: true }
+        top_trader_long_share: { type: number, nullable: true }
+        taker_buy_share: { type: number, nullable: true }
+        premium: { type: number, nullable: true, description: (mark-index)/index }
+
+    Facets:
+      type: object
+      properties:
+        retail_long_share: { type: number, nullable: true }
+        top_trader_long_share: { type: number, nullable: true }
+        taker_buy_share: { type: number, nullable: true }
+        whale_long_share: { type: number, nullable: true }
+        whale_n: { type: integer }
+        whale_long_usd: { type: number, nullable: true }
+        whale_short_usd: { type: number, nullable: true }
+        funding_8h: { type: number, nullable: true }
+        funding_apr_pct: { type: number, nullable: true }
+        oi_total_usd: { type: number, nullable: true }
+        oi_pctl_30d: { type: number, nullable: true, description: 0..1 percentile }
+        liq_24h_long_usd: { type: number, nullable: true }
+        liq_24h_short_usd: { type: number, nullable: true }
+
+    StateGroup: { type: string, enum: [up, down, range, squeeze, transition] }
+    StateId:
+      type: string
+      enum: [up_impulse, up_healthy_pullback, up_risky_pullback, up_overheated, up_exhaustion,
+             down_impulse, down_healthy_bounce, down_risky_bounce, down_capitulation, down_exhaustion,
+             range_top, range_mid, range_bottom, squeeze, breakout_pending, false_breakout]
+    RuleHit:
+      type: object
+      properties: { rule: { type: string }, value: { type: number, nullable: true }, threshold: { type: string }, hit: { type: boolean } }
+    TimeframeState:
+      type: object
+      required: [tf, state, group, since_ts]
+      properties:
+        tf: { type: string, enum: [1h, 4h, 1d] }
+        state: { $ref: "#/components/schemas/StateId" }
+        group: { $ref: "#/components/schemas/StateGroup" }
+        since_ts: { type: integer }
+        rules: { type: array, items: { $ref: "#/components/schemas/RuleHit" } }
+    MarketState:
+      type: object
+      required: [rules_version, timeframes]
+      properties:
+        rules_version: { type: string, example: v1 }
+        timeframes: { type: array, items: { $ref: "#/components/schemas/TimeframeState" } }
+        combined: { $ref: "#/components/schemas/Sentence" }
+
+    Prism:
+      type: object
+      required: [symbol, as_of, sources, facets, crowding, venues, sentence]
+      properties:
+        symbol: { type: string }
+        as_of: { type: integer }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        price: { type: number, nullable: true }
+        chg24h_pct: { type: number, nullable: true }
+        vol24h_total_usd: { type: number, nullable: true }
+        facets: { $ref: "#/components/schemas/Facets" }
+        crowding: { type: number, nullable: true, minimum: -1, maximum: 1 }
+        crowding_pctl_30d: { type: number, nullable: true }
+        state: { $ref: "#/components/schemas/MarketState" }
+        venues: { type: array, items: { $ref: "#/components/schemas/VenueRow" } }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+
+    CoinSummary:
+      type: object
+      required: [symbol]
+      properties:
+        symbol: { type: string }
+        price: { type: number, nullable: true }
+        chg24h_pct: { type: number, nullable: true }
+        oi_total_usd: { type: number, nullable: true }
+        oi_chg24h_pct: { type: number, nullable: true }
+        funding_8h: { type: number, nullable: true }
+        funding_apr_pct: { type: number, nullable: true }
+        funding_spread: { type: number, nullable: true }
+        retail_long_share: { type: number, nullable: true }
+        top_trader_long_share: { type: number, nullable: true }
+        whale_long_share: { type: number, nullable: true }
+        whale_n: { type: integer }
+        crowding: { type: number, nullable: true }
+        liq_24h_usd: { type: number, nullable: true }
+        state_1h: { $ref: "#/components/schemas/StateId" }
+        state_4h: { $ref: "#/components/schemas/StateId" }
+        state_1d: { $ref: "#/components/schemas/StateId" }
+        why: { $ref: "#/components/schemas/Sentence", description: present when preset is used }
+        extra: { type: object, additionalProperties: true, description: columns requested via cols }
+    CoinList:
+      type: object
+      required: [as_of, items]
+      properties:
+        as_of: { type: integer }
+        items: { type: array, items: { $ref: "#/components/schemas/CoinSummary" } }
+        next_cursor: { type: string, nullable: true }
+
+    KeyLevel:
+      type: object
+      required: [kind, price, dist_pct]
+      properties:
+        kind: { type: string, enum: [prev_high, prev_low, prev_close, week_open, month_open, day_open, vwap, vwap_up, vwap_dn, avwap, poc, hvn, lvn, round, range_mid] }
+        price: { type: number }
+        dist_pct: { type: number }
+        overlaps_liq_cluster: { type: boolean }
+    Session:
+      type: object
+      properties: { name: { type: string, enum: [asia, europe, us] }, ret_pct: { type: number, nullable: true } }
+    OIQuadrant: { type: string, enum: [price_up_oi_up, price_up_oi_down, price_down_oi_up, price_down_oi_down] }
+    Context:
+      type: object
+      required: [symbol, as_of, sentences, state]
+      properties:
+        symbol: { type: string }
+        as_of: { type: integer }
+        sentences:
+          type: object
+          properties:
+            state: { $ref: "#/components/schemas/Sentence" }
+            position: { $ref: "#/components/schemas/Sentence" }
+            driver: { $ref: "#/components/schemas/Sentence" }
+            volatility: { $ref: "#/components/schemas/Sentence" }
+        state: { $ref: "#/components/schemas/MarketState" }
+        ema:
+          type: object
+          additionalProperties:
+            type: object
+            properties: { ema20: { type: number }, ema50: { type: number }, ema200: { type: number }, above20: { type: boolean }, above50: { type: boolean }, above200: { type: boolean } }
+        range: { type: object, nullable: true, properties: { low: { type: number }, high: { type: number }, pos_pct: { type: number } } }
+        vol:
+          type: object
+          properties: { atr14: { type: number }, atr_pctl_90d: { type: number }, regime: { type: string, enum: [low, normal, high, extreme] }, implied_daily_pct: { type: number, nullable: true }, realized_24h_pct: { type: number } }
+        btc_corr_7d: { type: number, nullable: true }
+        btc_beta_7d: { type: number, nullable: true }
+        key_levels: { type: array, items: { $ref: "#/components/schemas/KeyLevel" } }
+        last24h:
+          type: object
+          properties:
+            high: { type: number }
+            low: { type: number }
+            range_pct: { type: number }
+            pos_pct: { type: number }
+            vol_ratio_30d: { type: number }
+            max_15m_move: { type: object, properties: { ts: { type: integer }, pct: { type: number }, liq_usd: { type: number } } }
+            sessions: { type: array, items: { $ref: "#/components/schemas/Session" } }
+            oi_chg_pct: { type: number }
+            oi_quadrant: { $ref: "#/components/schemas/OIQuadrant" }
+            funding_chg: { type: number }
+            liq_long_usd: { type: number }
+            liq_short_usd: { type: number }
+            whale_net_open_usd: { type: number }
+        drivers:
+          type: object
+          properties:
+            led_by: { type: string, enum: [spot, perp, mixed, unknown] }
+            premium_24h: { $ref: "#/components/schemas/Series" }
+            cvd_spot: { $ref: "#/components/schemas/Series" }
+            cvd_perp: { $ref: "#/components/schemas/Series" }
+            breakout: { type: object, nullable: true, properties: { level: { $ref: "#/components/schemas/KeyLevel" }, ts: { type: integer }, oi_chg_pct: { type: number }, cvd_dir: { type: string }, vol_ratio: { type: number }, verdict: { type: string, enum: [aligned, mixed] } } }
+            book: { type: object, nullable: true, properties: { bid_1pct_usd: { type: number }, ask_1pct_usd: { type: number }, bid_2pct_usd: { type: number }, ask_2pct_usd: { type: number }, pctl_30d: { type: number } } }
+            oi_to_mcap: { type: number, nullable: true }
+            oi_to_mcap_pctl_30d: { type: number, nullable: true }
+            options: { type: object, nullable: true, properties: { dvol: { type: number }, implied_daily_pct: { type: number }, skew_25d: { type: number }, max_pain_week: { type: number } } }
+            basis_apr_pct: { type: number, nullable: true }
+        risk_sizer:
+          type: object
+          properties: { atr14: { type: number }, formula: { type: string } }
+        calendar: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } }
+
+    LiqCluster:
+      type: object
+      properties: { price: { type: number }, side: { type: string, enum: [long, short] }, est_usd: { type: number }, model: { type: string, const: estimated } }
+    WhaleLiqPoint:
+      type: object
+      properties: { price: { type: number }, side: { type: string, enum: [long, short] }, notional_usd: { type: number }, address: { type: string }, name: { type: string, nullable: true } }
+    Levels:
+      type: object
+      required: [symbol, as_of, price, liq_clusters, whale_liq, real_liq_24h, sentence]
+      properties:
+        symbol: { type: string }
+        as_of: { type: integer }
+        price: { type: number }
+        range_pct: { type: number }
+        lev_weights: { type: object, additionalProperties: { type: number } }
+        liq_clusters: { type: array, items: { $ref: "#/components/schemas/LiqCluster" } }
+        whale_liq: { type: array, items: { $ref: "#/components/schemas/WhaleLiqPoint" } }
+        real_liq_24h: { type: array, items: { type: object, properties: { price: { type: number }, side: { type: string }, usd: { type: number } } } }
+        totals: { type: object, properties: { above_short_usd: { type: number }, below_long_usd: { type: number } } }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+
+    Series:
+      type: object
+      required: [fields, points]
+      properties:
+        fields: { type: array, items: { type: string } }
+        points: { type: array, items: { type: array, items: { type: number, nullable: true }, description: "[ts, f1, f2, ...]" } }
+    StateHistory:
+      type: object
+      properties:
+        symbol: { type: string }
+        rules_version: { type: string }
+        hours: { type: array, items: { type: array, items: {}, description: "[ts, state_1h, state_4h, state_1d, price]" } }
+    Snapshot:
+      type: object
+      required: [at, prism]
+      properties:
+        at: { type: integer }
+        prism: { $ref: "#/components/schemas/Prism" }
+        around: { $ref: "#/components/schemas/Series" }
+        events: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        replay_sentence: { $ref: "#/components/schemas/Sentence" }
+    Breadth:
+      type: object
+      properties:
+        as_of: { type: integer }
+        n: { type: integer }
+        up_24h_share: { type: number }
+        above_ema20_share: { type: number }
+        oi_up_share: { type: number }
+        alt_vs_btc_24h_pct: { type: number }
+        sessions_7d: { type: array, items: { type: object, properties: { date: { type: string }, asia: { type: number }, europe: { type: number }, us: { type: number } } } }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+    InsightCard:
+      type: object
+      properties:
+        id: { type: string, enum: [late, danger, whales, missed, cost, rekt_soon] }
+        title: { type: object, properties: { zh: { type: string }, en: { type: string } } }
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        link: { type: string }
+    Insights:
+      type: object
+      properties:
+        as_of: { type: integer }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+        cards: { type: array, items: { $ref: "#/components/schemas/InsightCard" } }
+
+    FundingRow:
+      type: object
+      properties:
+        symbol: { type: string }
+        venues: { type: object, additionalProperties: { type: object, properties: { raw: { type: number }, interval_h: { type: integer }, f8h: { type: number }, apr_pct: { type: number }, predicted: { type: number, nullable: true }, next_ts: { type: integer } } } }
+        f8h_weighted: { type: number, nullable: true }
+        apr_pct: { type: number, nullable: true }
+        spread: { type: number, nullable: true }
+        oi_total_usd: { type: number, nullable: true }
+    FundingHistory:
+      type: object
+      properties:
+        symbol: { type: string }
+        series: { $ref: "#/components/schemas/Series" }
+        cum_long_30d: { type: number }
+        cum_short_30d: { type: number }
+    ArbRow:
+      type: object
+      properties: { symbol: { type: string }, long_venue: { $ref: "#/components/schemas/Venue" }, short_venue: { $ref: "#/components/schemas/Venue" }, spread_8h: { type: number }, gross_apr_pct: { type: number }, net_apr_pct: { type: number }, tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } } }
+    LSRatio:
+      type: object
+      properties: { venue: { $ref: "#/components/schemas/Venue" }, kind: { type: string, enum: [account, top_account, top_position, taker] }, long_share: { type: number }, ts: { type: integer } }
+
+    Liquidation:
+      type: object
+      required: [ts, venue, symbol, side, price, usd]
+      properties:
+        ts: { type: integer }
+        venue: { $ref: "#/components/schemas/Venue" }
+        symbol: { type: string }
+        side: { type: string, enum: [long, short] }
+        price: { type: number }
+        qty: { type: number }
+        usd: { type: number }
+        cascade_id: { type: string, nullable: true }
+    LiqAggRow:
+      type: object
+      properties: { key: { type: string }, long_usd: { type: number }, short_usd: { type: number }, count: { type: integer } }
+    Heatmap:
+      type: object
+      properties:
+        symbol: { type: string }
+        model: { type: string, const: estimated }
+        lev_weights: { type: object, additionalProperties: { type: number } }
+        times: { type: array, items: { type: integer } }
+        prices: { type: array, items: { type: number } }
+        grid: { type: array, items: { type: array, items: { type: number } } }
+        price_now: { type: number }
+    Cascade:
+      type: object
+      properties: { id: { type: string }, symbol: { type: string }, side: { type: string }, start_ts: { type: integer }, end_ts: { type: integer }, usd: { type: number }, price_move_pct: { type: number } }
+
+    WhaleSource: { type: string, enum: [hyperliquid, okx] }
+    WhalePosition:
+      type: object
+      required: [address, source, symbol, side, notional_usd]
+      properties:
+        address: { type: string }
+        name: { type: string, nullable: true }
+        source: { $ref: "#/components/schemas/WhaleSource" }
+        symbol: { type: string }
+        side: { type: string, enum: [long, short] }
+        size: { type: number }
+        notional_usd: { type: number }
+        entry: { type: number, nullable: true }
+        mark: { type: number, nullable: true }
+        liq: { type: number, nullable: true }
+        liq_distance_pct: { type: number, nullable: true }
+        lev: { type: number, nullable: true }
+        lev_type: { type: string, enum: [cross, isolated], nullable: true }
+        upnl_usd: { type: number, nullable: true }
+        roe: { type: number, nullable: true }
+        account_value_usd: { type: number, nullable: true }
+        opened_ts: { type: integer, nullable: true }
+    Wallet:
+      type: object
+      required: [address, source, account_value_usd]
+      properties:
+        address: { type: string }
+        name: { type: string, nullable: true }
+        labels: { type: array, items: { type: string } }
+        source: { $ref: "#/components/schemas/WhaleSource" }
+        account_value_usd: { type: number }
+        n_pos: { type: integer }
+        long_notional_usd: { type: number }
+        short_notional_usd: { type: number }
+        pnl_1d_usd: { type: number, nullable: true }
+        pnl_7d_usd: { type: number, nullable: true }
+        pnl_30d_usd: { type: number, nullable: true }
+        roi_30d: { type: number, nullable: true }
+        mdd_30d: { type: number, nullable: true }
+        hit_rate_24h: { type: number, nullable: true, description: site-computed, null when n<30 }
+        hit_rate_n: { type: integer }
+        style_tags: { type: array, items: { type: string } }
+        followers: { type: integer }
+    WalletList:
+      type: object
+      properties:
+        as_of: { type: integer }
+        items: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
+        next_cursor: { type: string, nullable: true }
+    WalletDetail:
+      allOf:
+        - $ref: "#/components/schemas/Wallet"
+        - type: object
+          properties:
+            positions: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
+            equity_curve: { $ref: "#/components/schemas/Series" }
+            recent_events: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
+    Fill:
+      type: object
+      properties: { id: { type: string }, ts: { type: integer }, symbol: { type: string }, side: { type: string }, px: { type: number }, sz: { type: number }, usd: { type: number }, closed_pnl_usd: { type: number }, liquidation: { type: boolean } }
+    FillList:
+      type: object
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/Fill" } }, next_cursor: { type: string, nullable: true } }
+    WhaleEventType: { type: string, enum: [open, add, reduce, close, flip, near_liq, liquidated] }
+    WhaleEvent:
+      type: object
+      required: [id, ts, address, source, symbol, type, side, notional_delta_usd]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        address: { type: string }
+        name: { type: string, nullable: true }
+        source: { $ref: "#/components/schemas/WhaleSource" }
+        symbol: { type: string }
+        type: { $ref: "#/components/schemas/WhaleEventType" }
+        side: { type: string, enum: [long, short] }
+        notional_delta_usd: { type: number }
+        px: { type: number, nullable: true }
+        account_value_usd: { type: number, nullable: true }
+        ret_1h: { type: number, nullable: true }
+        ret_4h: { type: number, nullable: true }
+        ret_24h: { type: number, nullable: true }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+    WhaleEventList:
+      type: object
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }, next_cursor: { type: string, nullable: true } }
+    WhaleCoinAgg:
+      type: object
+      properties: { symbol: { type: string }, long_usd: { type: number }, short_usd: { type: number }, n_long: { type: integer }, n_short: { type: integer }, long_share: { type: number, nullable: true }, net_open_24h_usd: { type: number } }
+    WhaleBoards:
+      type: object
+      properties:
+        as_of: { type: integer }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+        bets: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
+        rekt_soon: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
+        capitulation: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
+        winners: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
+        losers: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
+
+    EventType: { type: string, enum: [price, liq, cascade, funding, whale, crowd, state] }
+    Event:
+      type: object
+      required: [id, ts, type, symbol, sentence]
+      properties:
+        id: { type: string }
+        ts: { type: integer }
+        type: { $ref: "#/components/schemas/EventType" }
+        symbol: { type: string }
+        severity: { type: integer, minimum: 1, maximum: 3 }
+        numbers: { type: object, additionalProperties: true }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+        replay_url: { type: string }
+    EventList:
+      type: object
+      properties:
+        since: { type: integer }
+        until: { type: integer }
+        summary: { type: array, items: { $ref: "#/components/schemas/Sentence" }, maxItems: 3 }
+        items: { type: array, items: { $ref: "#/components/schemas/Event" } }
+    ScoreRow:
+      type: object
+      properties:
+        group: { type: string, description: "e.g. state:up_healthy_pullback:4h or whale:open:long:BTC or oiq:price_up_oi_down" }
+        n: { type: integer }
+        horizon: { type: string, enum: [1h, 4h, 24h, 72h] }
+        median_ret: { type: number, nullable: true }
+        p25: { type: number, nullable: true }
+        p75: { type: number, nullable: true }
+        hit_rate: { type: number, nullable: true }
+        ci_low: { type: number, nullable: true }
+        ci_high: { type: number, nullable: true }
+        tag: { $ref: "#/components/schemas/EvidenceTag" }
+    Scorecard:
+      type: object
+      properties: { window: { type: string }, as_of: { type: integer }, rows: { type: array, items: { $ref: "#/components/schemas/ScoreRow" } } }
+    CalendarItem:
+      type: object
+      properties: { ts: { type: integer }, kind: { type: string, enum: [funding, options_expiry, macro, listing, delisting] }, title: { type: object, properties: { zh: { type: string }, en: { type: string } } }, meta: { type: object, additionalProperties: true } }
+
+    OptionsSummary:
+      type: object
+      properties: { currency: { type: string }, as_of: { type: integer }, dvol: { type: number }, rv_30d: { type: number }, implied_daily_pct: { type: number }, pcr_oi: { type: number }, pcr_vol: { type: number }, skew_25d: { type: number }, term: { type: array, items: { type: object, properties: { expiry: { type: string }, atm_iv: { type: number }, max_pain: { type: number }, oi_usd: { type: number } } } } }
+    BasisRow:
+      type: object
+      properties: { venue: { type: string }, symbol: { type: string }, expiry: { type: string }, annualized_pct: { type: number }, perp_funding_apr_pct: { type: number, nullable: true } }
+    Macro:
+      type: object
+      properties:
+        as_of: { type: integer }
+        fng: { type: object, properties: { value: { type: integer }, label: { type: string }, history: { type: array, items: { type: integer } } } }
+        stablecoin_supply_usd: { type: number, nullable: true }
+        stablecoin_chg_7d_pct: { type: number, nullable: true }
+        etf_flow_btc_usd: { type: number, nullable: true }
+        etf_flow_eth_usd: { type: number, nullable: true }
+        btc_dominance_pct: { type: number, nullable: true }
+        polymarket: { type: array, items: { type: object, properties: { question: { type: string }, yes_prob: { type: number }, url: { type: string } } } }
+
+    Status:
+      type: object
+      properties:
+        as_of: { type: integer }
+        sources: { type: array, items: { type: object, properties: { name: { type: string }, status: { type: string, enum: [ok, stale, error] }, last_ok_ts: { type: integer }, latency_ms: { type: number }, uptime_30d: { type: number } } } }
+        version: { type: string }
+
+    Me:
+      type: object
+      properties: { id: { type: string }, email: { type: string }, plan: { type: string, enum: [free, pro, team] }, lang: { type: string }, tz: { type: string }, telegram_linked: { type: boolean } }
+    MyPositionInput:
+      type: object
+      required: [symbol, side, entry, lev]
+      properties: { symbol: { type: string }, side: { type: string, enum: [long, short] }, entry: { type: number }, lev: { type: number }, size_usd: { type: number, nullable: true }, stop: { type: number, nullable: true } }
+    MyPosition:
+      allOf:
+        - $ref: "#/components/schemas/MyPositionInput"
+        - type: object
+          properties: { id: { type: string }, created_ts: { type: integer } }
+    WatchItem:
+      type: object
+      required: [kind, key]
+      properties: { kind: { type: string, enum: [coin, wallet] }, key: { type: string } }
+    Watchlist:
+      type: object
+      properties: { items: { type: array, items: { $ref: "#/components/schemas/WatchItem" } } }
+    AlertScope: { type: string, enum: [position, coin, wallet, market] }
+    AlertMetric:
+      type: string
+      enum: [funding_8h, funding_spread, oi_chg_pct, liq_1h_usd, cascade, whale_event, whale_near_liq, gap_pts, crowding, price, state_change, liq_distance_pct]
+    AlertRuleInput:
+      type: object
+      required: [scope, metric, op, value, channels]
+      properties:
+        scope: { $ref: "#/components/schemas/AlertScope" }
+        target: { type: string, nullable: true, description: symbol / address / position id }
+        metric: { $ref: "#/components/schemas/AlertMetric" }
+        op: { type: string, enum: [gt, lt, crosses_up, crosses_down, eq] }
+        value: { type: number, nullable: true }
+        window: { type: string, nullable: true }
+        cooldown_s: { type: integer, default: 3600 }
+        channels: { type: array, items: { type: string, enum: [telegram, email, push, webhook] } }
+        template_id: { type: string, nullable: true }
+        enabled: { type: boolean, default: true }
+    AlertRule:
+      allOf:
+        - $ref: "#/components/schemas/AlertRuleInput"
+        - type: object
+          properties: { id: { type: string }, created_ts: { type: integer }, last_fired_ts: { type: integer, nullable: true } }
+    AlertDelivery:
+      type: object
+      properties: { id: { type: string }, rule_id: { type: string }, ts: { type: integer }, channel: { type: string }, status: { type: string, enum: [sent, failed, retrying] }, preview: { type: string } }
+    ApiKey:
+      type: object
+      properties: { id: { type: string }, prefix: { type: string }, created_ts: { type: integer }, last_used_ts: { type: integer, nullable: true }, calls_30d: { type: integer } }
+    ApiKeyCreated:
+      allOf:
+        - $ref: "#/components/schemas/ApiKey"
+        - type: object
+          properties: { key: { type: string, description: shown once } }

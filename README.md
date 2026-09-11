@@ -34,7 +34,7 @@ Edit `config.js` to set community links (Telegram / Discord / X / WeChat QR) and
 | `data/latest.json` | full snapshot: `coins[]` (prism facets + per-exchange rows), `whales` (wallets, by_coin, top_positions), `macro`, `sources` |
 | `data/history.json` | last 7 days of `[price, funding_8h, oi_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
 
-Schema is documented in [docs/SPEC.md](docs/SPEC.md). The production-grade product and technical definition (backend services, data model, API, alerts, pages) is in [docs/PRODUCTION-SPEC.md](docs/PRODUCTION-SPEC.md); the user-facing page definition (organised around trader questions, with a local "my position" mode) is in [docs/USER-SPEC.md](docs/USER-SPEC.md).
+Schema of the static snapshot is a subset of the production contract. The project is documented as a four-part set: [docs/00-PROJECT.md](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [docs/01-FEATURES.md](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [docs/02-API.md](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [docs/03-DEVELOPMENT.md](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment). Older drafts live in `docs/archive/`.
 
 ## Sources
 
