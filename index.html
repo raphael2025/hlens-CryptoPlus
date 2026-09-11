@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hlens · One coin, every angle. Perp positioning prism + Hyperliquid whale lens</title>
+<meta name="description" content="hlens splits a perpetual-futures market into its spectrum: funding, open interest, retail vs top-trader vs whale positioning across Binance, Bybit, OKX and Hyperliquid. Free, open source, refreshed every 30 minutes.">
+<meta property="og:title" content="hlens — the perp positioning prism">
+<meta property="og:description" content="Retail vs whales, funding vs open interest, four exchanges in one view. Plus a live Hyperliquid whale lens.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='.5' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%23fbbf24'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points='32,6 58,56 6,56' fill='none' stroke='url(%23g)' stroke-width='6' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="#">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset=".5" stop-color="#22d3ee"/><stop offset="1" stop-color="#fbbf24"/></linearGradient></defs><polygon points="32,6 58,56 6,56" fill="none" stroke="url(#lg)" stroke-width="6" stroke-linejoin="round"/></svg>
+    <span class="brand-name">hlens</span>
+    <span class="brand-tag" data-i18n="tagline">the perp positioning prism</span>
+  </a>
+  <nav class="nav">
+    <a href="#prism" data-i18n="nav.prism">Prism</a>
+    <a href="#whales" data-i18n="nav.whales">Whale lens</a>
+    <a href="#method" data-i18n="nav.method">Method</a>
+    <a id="gh-link" href="#" target="_blank" rel="noopener">GitHub</a>
+    <button id="lang" class="lang" type="button" aria-label="language">中文</button>
+    <a id="join-top" class="btn btn-primary" href="#join" data-i18n="join.cta">Join the community</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="spectrum-bar" aria-hidden="true"></div>
+  <h1 data-i18n="hero.h1">One coin. Every angle.</h1>
+  <p class="lede" data-i18n="hero.lede">A prism splits white light into a spectrum. hlens splits a perpetual market into the people inside it: retail, top traders and on-chain whales, across Binance, Bybit, OKX and Hyperliquid. When they disagree, that is the signal.</p>
+  <div class="status" id="status">
+    <span class="pill pill-muted" data-i18n="status.loading">loading data…</span>
+  </div>
+</section>
+
+<section id="insight" class="insight hidden">
+  <div class="insight-grid" id="insight-grid"></div>
+</section>
+
+<section id="prism" class="block">
+  <div class="block-head">
+    <h2 data-i18n="prism.h2">The prism</h2>
+    <p data-i18n="prism.sub">Pick a coin. Each row is one facet of the same market. Bars are centred at 50% (or zero); the further from centre, the more one-sided the crowd.</p>
+  </div>
+  <div class="tabs" id="coin-tabs" role="tablist"></div>
+  <div class="prism-panel" id="prism-panel"></div>
+</section>
+
+<section id="whales" class="block">
+  <div class="block-head">
+    <h2 data-i18n="whales.h2">Hyperliquid whale lens</h2>
+    <p data-i18n="whales.sub">Every position on Hyperliquid is on-chain and public. We scan the leaderboard for the largest and best-performing wallets, then read their live positions. No API key, no guessing.</p>
+  </div>
+  <div class="whale-grid">
+    <div class="card">
+      <h3 data-i18n="whales.bycoin">Where the whale money sits</h3>
+      <p class="hint" data-i18n="whales.bycoin.hint">Notional long vs short per coin, summed over tracked wallets.</p>
+      <div id="whale-bycoin"></div>
+    </div>
+    <div class="card">
+      <h3 data-i18n="whales.toppos">Largest open positions</h3>
+      <p class="hint" data-i18n="whales.toppos.hint">Single positions ranked by notional. Liquidation price is the exchange's own estimate.</p>
+      <div class="table-wrap"><table id="whale-toppos"></table></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 data-i18n="whales.wallets">Tracked wallets</h3>
+    <p class="hint" data-i18n="whales.wallets.hint">Sorted by live account value. PnL and ROI come from the official leaderboard windows.</p>
+    <div class="table-wrap"><table id="whale-wallets"></table></div>
+  </div>
+</section>
+
+<section id="join" class="block join">
+  <div class="join-card">
+    <div class="spectrum-bar" aria-hidden="true"></div>
+    <h2 data-i18n="join.h2">Read the spectrum together</h2>
+    <p data-i18n="join.p">The dashboard shows the numbers. The community is where we argue about what they mean: whale flips, crowded funding, liquidation clusters, and honest post-mortems on trades that went wrong. No signals, no paid calls.</p>
+    <div class="join-links" id="join-links"></div>
+    <p class="hint" id="join-empty" data-i18n="join.empty">Community links are being set up. Star the GitHub repo to get notified.</p>
+  </div>
+</section>
+
+<section id="method" class="block">
+  <div class="block-head">
+    <h2 data-i18n="method.h2">Method, in plain words</h2>
+  </div>
+  <div class="method-grid">
+    <div class="card"><h3 data-i18n="m1.h">Funding, normalised</h3><p data-i18n="m1.p">Exchanges settle funding every 1h, 4h or 8h. We rescale everything to an 8-hour rate and weight the cross-exchange average by open interest, so a small venue cannot skew the number.</p></div>
+    <div class="card"><h3 data-i18n="m2.h">Three kinds of positioning</h3><p data-i18n="m2.p">Retail = share of accounts net long (Binance, Bybit, OKX). Top traders = Binance top-20% accounts by position. Whales = notional-weighted long share of tracked Hyperliquid wallets. These usually disagree; the gap is the point.</p></div>
+    <div class="card"><h3 data-i18n="m3.h">Crowding score</h3><p data-i18n="m3.p">Average of three clipped terms: funding ÷ 0.05%, (retail long share − 50%) × 4, (taker buy share − 50%) × 6. Range −1 to +1. It is a description of the crowd, not a forecast.</p></div>
+    <div class="card"><h3 data-i18n="m4.h">Whale selection</h3><p data-i18n="m4.p">Union of the top 90 wallets by account value, top 40 by monthly PnL, top 30 by weekly PnL and top 25 by monthly ROI among wallets over $1M. Positions under $100k are ignored.</p></div>
+  </div>
+</section>
+
+<footer class="foot">
+  <p data-i18n="foot.disclaimer">hlens is a free research tool. Nothing here is investment advice. Perpetual futures with leverage can lose more than your deposit. Data comes from public exchange APIs and can be delayed or wrong; verify before acting.</p>
+  <p><span data-i18n="foot.sources">Sources: Binance USDⓈ-M, Bybit linear, OKX swap, Hyperliquid info API and leaderboard.</span> <span id="foot-refresh"></span> · <a id="gh-link-2" href="#" target="_blank" rel="noopener">MIT · GitHub</a></p>
+</footer>
+
+<script src="config.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
