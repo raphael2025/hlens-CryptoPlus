@@ -1,5 +1,7 @@
 # hlens · CryptoPlus 产品方案（v0.1 → v1.0）
 
+> **注意**：本文件是 v1（零服务器版本），已被 [PRODUCTION-SPEC.md](PRODUCTION-SPEC.md)（生产级定义 v2）取代，保留作为 v0.1 的记录。
+
 > 状态：草案 v1，2026-09-11。作者：Claude，按 raphael 的要求独立决策。
 > 一句话定位：**合约持仓棱镜**。把一个币的永续合约市场拆成"散户 / 大账户 / 链上大户 / 资金费 / 持仓量 / 爆仓 / 期权"七个光谱面，并排展示，让分歧本身成为信号。
 > 硬约束：零服务器（GitHub Pages + GitHub Actions），最多加一个 Cloudflare Worker；所有数据来自免 key 公开接口；面向全球，中英双语；未来同一份数据要能给 API 和 MCP 用。

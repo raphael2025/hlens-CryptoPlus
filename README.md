@@ -34,7 +34,7 @@ Edit `config.js` to set community links (Telegram / Discord / X / WeChat QR) and
 | `data/latest.json` | full snapshot: `coins[]` (prism facets + per-exchange rows), `whales` (wallets, by_coin, top_positions), `macro`, `sources` |
 | `data/history.json` | last 7 days of `[price, funding_8h, oi_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
 
-Schema is documented in [docs/SPEC.md](docs/SPEC.md) and will be versioned once the MCP server lands.
+Schema is documented in [docs/SPEC.md](docs/SPEC.md). The production-grade product and technical definition (backend services, data model, API, alerts, pages) is in [docs/PRODUCTION-SPEC.md](docs/PRODUCTION-SPEC.md).
 
 ## Sources
 
