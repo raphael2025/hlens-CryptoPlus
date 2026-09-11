@@ -13,7 +13,7 @@
 | `/whales` `/whale/{address}` | 无聊 | 大户在干什么 | `getWhaleBoards`, `listWhaleEvents`, `getWallet` |
 | `/replay?symbol=&at=` | 亏后（从"当时看"进入） | 当时发生了什么 | `getSnapshot` |
 | `/find` | 选币 | 今天做哪个 | `listCoins?preset=` |
-| `/alerts` | 持仓 | 帮我盯着 | `/me/alerts` |
+| `/alerts` | 持仓 | 帮我盯着 | `listAlerts`, `createAlert` |
 | `/method` `/scorecard` `/evidence` `/status` `/changelog` | 信任 | 凭什么信你 | `getScorecard`, `getStatus` |
 | `/me` | – | 我的仓位、关注、告警、API key、设置 | 本地 + `/me/*` |
 | `/terms` `/privacy` `/disclaimer` `/sources` | – | 法律 | 静态 |
@@ -27,11 +27,11 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 - **优先级**：事件级（投降 / 级联 / 假突破，4h 内）→ 状态级（三周期组合）→ 人群级（|crowding| ≥ 0.3 或分歧 ≥ 25 点）→ 默认（"均衡"）。
 - **矛盾消解**：方向相反时第二句用"但"；缺数据的短语省略；置信门槛按 §00 §4.4 的分面新鲜度预算，超限短语置灰而非整句降级。
 - **后果分布句**（允许，非建议）："过去 2 年拥挤度 > +0.4 出现 187 次，之后 24h 中位 −0.3%，22% 出现过 ≥ 5% 回撤。" 只在记分板对应分组 n ≥ 100 时出现，标 `站内自验证`。
-- **上线范围**：S2 五个模板（状态组合、拥挤、分歧、事件、默认）；黄金测试用**合成输入**（覆盖 16 态 × 矛盾 × 缺数据），CI 断言 `template_id`；真实回放人工评审推迟到自有数据满 30 天。
+- **上线范围**：S2 五个模板（状态组合、拥挤、分歧、事件、默认）；黄金测试用**合成输入**（覆盖 v1 规则可达的 13 态 × 矛盾 × 缺数据；含 OI/爆仓的 3 态随 v2 规则补），CI 断言 `template_id`；真实回放人工评审推迟到自有数据满 30 天。
 - **审计**：`sentence_log` 只在 `inputs_hash` 变化时写入，存 inputs 与 template_id，不存文本。
 
 ## 2. 状态词典与校准
-- 16 态：上涨 5（推进 / 回调·浅 / 回调·带杠杆堆积 / 过热 / 衰竭）、下跌 5（镜像 + 投降）、震荡 3（上沿 / 中部 / 下沿）、压缩 1、转换 2（突破待确认 / 假突破）。`StateId` 枚举为准。
+- 16 态：上涨 5（推进 / 回调·浅 / 回调·带杠杆堆积 / 过热 / 衰竭）、下跌 5（镜像 + 投降）、震荡 3（上沿 / 中部 / 下沿）、压缩 1、转换 2（突破待确认 / 假突破）。`StateId` 枚举为准。其中 `up_pullback_leveraged`、`down_bounce_leveraged`、`down_capitulation` 依赖 OI/爆仓，属 v2 规则；v1 可达 13 态。
 - **命名规则**：在记分板该状态 n ≥ 100 且 FDR 显著之前，界面用**中性名**（`display_tier: provisional`，如"回调·浅"），之后才可启用带判断的名（"健康回调"）。状态芯片旁永远一行：`近 2 年出现 312 次 · 之后 24h 中位 +0.4% · 46% 跌破本次低点`，或"样本不足"。
 - **v1 规则只用价格类特征**（EMA/ATR/ADX/结构/量比/RSI），2 年 K 线可回补；含 OI、爆仓、CVD 的条件进 `state_rules.v2`，自有数据满 90 天后校准。
 - 校准流程：前 50 币、2 年 1h；输出频率、中位持续、转移矩阵、前瞻分布、抖动率；验收：频率 2–35%、中位持续 ≥ 3 根、最大占比 ≤ 40%、抖动 < 15%；报告入 `docs/reports/`。
@@ -50,6 +50,7 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 | `PrismChart` | 前 30 币光谱（次要区块，可折叠） | `listCoins` | 60s | 表格视图切换 |
 | `BreadthBars` | 三根进度条 + 一句话 + 7 天时段格 | `getBreadth` | 5m | – |
 | `SourceDots` | 红绿灯 + 覆盖币数 + 更新时间（**如实显示，如"覆盖 8 币 · 2 分钟前"**） | `getStatus` | 30s | – |
+| `MacroStrip` | 恐惧贪婪 + 稳定币 7 天变化 + BTC 主导率，一行三项 | `getMacro` | 1h | 缺项隐藏 |
 
 ### 3.2 我睡觉时 `/missed`
 `RangePicker`（8h/24h/自定义）· `SummaryThree`（先说我持仓的币："你的 SOL 多单夜里最深浮亏 −6.2%（03:40），现在 −1.1%"）· `EventTimeline`（7 类：price / liq / cascade / funding / whale / crowd / state，各自图标与样式；每条：一句话 + 三个数字 + "当时看"）· `SubscribeDigest`。数据 `listEvents?since&until&types`。
@@ -60,9 +61,9 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 | `CoinHeader` | 名、价、24h、总 OI、成交、所可用图标、关注、分享 | `prism.price`, `prism.chg24h_pct`, `prism.facets.oi_total_usd`, `prism.venues[].ok` |
 | `AnswerSentence` | 主句（含分位）+ 矛盾句 + 标签 | `prism.sentence` |
 | `StateStrip` | 三周期芯片 + 统计行 + 30 天色带 | `prism.state`, `getStateHistory` |
-| `SpectrumRows`（6） | 散户多头 / 大账户多头 / 主动买入 / 大户多头 / 费率 8h / OI 分位；中心对齐条 + 数值 + 分位；**大户行 n < 10 置灰写"只追踪到 n 个仓位，样本太少"**；hover 显示各所当前值（`listLsRatios`）与聚合 7 日迷你图 | `prism.facets.*`, `prism.facets.whale_n` |
+| `SpectrumRows`（6） | 散户多头 / 大账户多头 / 主动买入 / 大户多头 / 费率 8h / OI 分位；中心对齐条 + 数值 + 分位；**大户行 n < 10 置灰写"只追踪到 n 个仓位，样本太少"**；hover 显示各所当前值（`listLsRatios`）与聚合 7 日迷你图（`getHistory?fields=retail_long_share,…`） | `prism.facets.*`, `prism.facets.whale_long_share.n` |
 | `CrowdingGauge` | −1..+1 + 30 天分位 | `prism.crowding`, `prism.crowding_pctl_30d` |
-| `RetailVsWhale` | 事实句 + 与我仓位关系 | `facets.retail_long_share`, `facets.whale_long_share`, `facets.whale_n`, `facets.funding_8h` |
+| `RetailVsWhale` | 事实句 + 与我仓位关系 | `facets.retail_long_share`, `facets.whale_long_share`（含 `.n`）, `facets.gap_pts`, `facets.funding_8h` |
 | `CostRow` | 一行："你这个仓位每天 12.4 美元，换到 OKX 省 4.1"，点开展开表 | `prism.venues[]` + 本地仓位 |
 | `TimeSeriesPanel` | 价格 + 叠加：crowding / funding_8h / oi_total_usd / retail_long_share / whale_net_usd / liq_long_usd+liq_short_usd | `getHistory?fields=` |
 | `VenueTable` | 价、费率原始·8h·年化、结算倒计时、OI、成交、散户多头；最便宜所高亮 | `prism.venues[]` |
@@ -87,7 +88,7 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 8 个中性名预设：空头持仓集中度高 / 多头持仓集中度高 / 大户与散户相反 / OI 24h 增幅大 / 费率为负 / 大户刚翻转 / 回调·浅 / 压缩。结果行：币、价、迷你光谱、一句为什么（含分位）、状态芯片、关注 / 告警。高级表格不做（v1.1 Pro）。
 
 ### 3.9 告警 `/alerts`
-免费 5 条（必含"距强平 < 10%"模板）+ 每日摘要；Pro 50 条。模板（人话）：有大户在我反向新开 ≥ 500 万；我的币开始连环爆仓（相对阈值）；我持仓方向费率转为不利且年化 > 20%；距强平 < 10%；状态变化；拥挤度穿越。渠道：Telegram（主）、Email、Web Push（`/me/push-subscriptions`；iOS 需先安装 PWA）。消息：一句话 + 三数字 + 迷你光谱图 + "当时看"深链。
+免费 5 条（必含"距强平 < 10%"模板）+ 每日摘要（Telegram 或 Web Push）；Pro 50 条。模板（人话）：距强平 < 10%（免费）；状态变化（免费）；拥挤度穿越（免费）；**Pro 专属三种**：有大户在我反向新开 ≥ 500 万（`whale_event`）、我的币开始连环爆仓（`cascade`，相对阈值）、我持仓方向费率转为不利且年化 > 20%（`funding_apr_pct`）。渠道：Telegram（主）、Email（仅规则告警，不发摘要）、Web Push（`/me/push-subscriptions`；iOS 需先安装 PWA）。消息：一句话 + 三数字 + 迷你光谱图 + "当时看"深链。
 
 ### 3.10 我的仓位（全站）
 - 输入：表单或**粘贴一行**"BTC 多 78200 10x"；字段 `symbol, side, entry, lev, venue?, size_usd?, stop?`；本地 `localStorage['hlens.pos.v1']`（含 `schema`、`client_id`、`updated_ts`）；登录后与 `/me/positions` 按 `client_id` 双向同步，`updated_ts` 大者胜，冲突弹合并面板。
@@ -96,7 +97,7 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 - 免责一句常驻。
 
 ### 3.11 方法 / 记分板 / 证据 / 状态 / 变更
-`MetricCards`（定义、公式、来源、局限、频率）· `EvidenceLibrary`（`getEvidence`）· `ScorecardTables`（分组、n、中位、p25/p75、命中率与 Wilson 区间、q 值；n < 30 显示"样本不足"）· `SourceStatus` · `Changelog`。记分板页顶："历史分布，非预测"。
+`MetricCards`（定义、公式、来源、局限、频率）· `EvidenceLibrary`（`listEvidence`）· `ScorecardTables`（分组、n、中位、p25/p75、命中率与 Wilson 区间、q 值；n < 30 显示"样本不足"）· `SourceStatus` · `Changelog`（`listChangelog`）。记分板页顶："历史分布，非预测"。本组页面与钱包页、币页**不出现返佣入口**；返佣只在 `/sources` 与 `/me`。
 
 ## 4. 术语气泡（首次出现给一次，不跳转）
 拥挤度 = 人群一边倒的程度（+1 全在做多）· OI 分位 = 现在的持仓量比过去 90 天 X% 的时间都高 · 压缩 = 波动被压扁，快要选方向 · 级联 = 连环爆仓 · 投降 = 大规模割肉 · POC = 过去 24h 成交最密的价格 · 站内自验证 = 我们自己回测过 n 次，结果在这 · 模型估算 = 用假设算出来的，不是真实挂单 · 分歧 = 散户多头占比与大户多头占比的差。
@@ -112,7 +113,7 @@ URL 状态约定：`?tf=1h|4h|1d`、`?range=1d..90d`、`?tab=`、`?preset=`、`?
 1. SSR 取该路由 1–2 个端点，`dehydrate` 注入 TanStack Query；答案句随 HTML 到达（LCP 元素零 JS 依赖）。
 2. Cloudflare 边缘缓存 SSR HTML，`s-maxage` 对齐 `x-hlens-cache`，`stale-while-revalidate=600`。
 3. 客户端 `openapi-fetch` + TanStack Query，`staleTime` = `x-hlens-cache`，`queryKey=[resource, ...params]`。
-4. 单条 WS 跑在 SharedWorker，多标签页 leader 选举；订阅集合 = 挂载组件注册的并集，引用计数归零才退订。
+4. 单条 WS；v1 每标签页一条，S2 后优化为 SharedWorker + 多标签页 leader 选举；订阅集合 = 挂载组件注册的并集，引用计数归零才退订。
 5. WS 消息 JSON Merge Patch 合并进 `setQueryData`，不触发网络请求。
 6. `seq` 缺口或心跳超时 → 频道标 `stale` → `invalidateQueries` 走 REST 补齐，卡片角标"补齐中"。
 7. 我的仓位独立于 Query 缓存，通过 selector 与行情 join。

@@ -13,7 +13,8 @@ apps/importer     hub 历史数据导入（DuckDB → Postgres）
 packages/hlens-core  Python 共享：适配器、指标、状态规则、句子引擎、DB
 packages/hlens-mcp   PyPI 包
 packages/ui          前端共享组件
-config/  state_rules.v1.yaml · sentence_templates.{zh,en}.yaml · venues.yaml · calendar_macro.json · scorecard_groups.yaml（预注册分组）
+config/  state_rules.v1.yaml · sentence_templates.{zh,en}.yaml · venues.yaml · calendar_macro.json · scorecard_groups.yaml（预注册分组）· evidence.yaml（证据库，`listEvidence` 数据源）
+docs/changelog.md                    # `listChangelog` 数据源（构建时解析）
 db/migrations（Alembic；CAGG 用 autocommit 迁移）
 deploy/  compose.tokyo.yml · compose.sg.yml · compose.staging.yml · Caddyfile · cloudflared/ · prometheus/ · grafana/ · scripts/{deploy,backup,restore,failover,promote}.sh
 tests/{unit,contract,golden,integration}
@@ -41,32 +42,33 @@ make calibrate # analytics/calibrate_states.py → docs/reports/
 - `instruments` 归一化：所有采集经映射（`1000PEPE`/`kPEPE`/`PEPE`、合约乘数、币本位标记、维持保证金分档）。
 
 ### 3.2 表（保留 / 压缩 / 估算）
-| 表 | 频率 | 压缩后 / 保留 | 估算（300 币 × 6 所） | 备注 |
+| 表 | 频率 | 压缩后 / 保留 | 估算（300 币 × 4 所：Binance/Bybit/OKX/HL；v1.1 加 Gate/Bitget 约 ×1.5） | 备注 |
 |---|---|---|---|---|
 | `instruments(venue, venue_symbol, symbol, mult, tick, is_inverse, mmr_tiers jsonb, listed_ts, delisted_ts)` | – | – | – | PK(venue, venue_symbol)，UNIQUE(venue, symbol) |
-| `ticks_1m`（CAGG，由 WS 标记价流生成 OHLC） | 1m | 1d / 2y | 2.6M 行/天 ≈ 60 MB/天压缩前 | 不存 5s 原始 tick；原始只进 Redis 60 秒环 |
+| `ticks_1m`（CAGG，由 WS 标记价流生成 OHLC） | 1m | 1d / 2y | 1.7M 行/天 ≈ 40 MB/天压缩前 | 不存 5s 原始 tick；原始只进 Redis 60 秒环 |
 | `funding(ts, venue, symbol, rate, interval_h, rate_8h, next_ts)` | 变化时写 | 1d / 2y | 约 300 所-币 × 3/天 | 预测费率单独 `funding_pred` |
-| `open_interest(ts, venue, symbol, oi_base, oi_usd)` | 1m | 1d / 2y | 2.6M 行/天 | 全市场端点一次拉全 |
-| `ls_ratio(ts, venue, symbol, kind, long_share)` | 5m | 1d / 2y | 0.5M 行/天 | kind 分开存，不做无权重平均 |
+| `open_interest(ts, venue, symbol, oi_base, oi_usd)` | 1m | 1d / 2y | 1.7M 行/天 | 全市场端点一次拉全 |
+| `ls_ratio(ts, venue, symbol, kind, long_share)` | 5m | 1d / 2y | 0.35M 行/天 | kind 分开存，不做无权重平均 |
 | `klines(ts, venue, symbol, tf, o,h,l,c,v, taker_buy_v)` | 1m 参考所 | 1m:30d，1h/1d 由层级 CAGG 永久 | 0.4M 行/天 | 参考所 = Binance（美区外） |
-| `book_depth(ts, venue, symbol, bid1, ask1, bid2, ask2)` | 1m，仅前 50 币 × 2 所 | 1d / 90d | 0.14M 行/天 | 其余币为 null |
 | `liquidations(ts, venue, symbol, side, price, size, notional_usd, cascade_id, throttled_source)` | 实时 | 1d / 2y | 峰值日 1M 行 | Binance/Bybit 为限流下界 |
 | `hl_asset_ctx(ts, coin, mark, funding_1h, oi, premium, vlm)` | 1m | 1d / 2y | 0.34M 行/天 | |
 | `hl_wallet_state(ts, address, account_value, margin_used)` | hot 1m / warm 10m | 1d / 1y | 0.4M 行/天 | |
 | `hl_positions(ts, address, coin, side, size, notional, entry, liq, lev, upnl, is_cross, liq_px_reliable)` | 同上 | 1d / 1y | 1M 行/天 | 对账用；事件以 fills 为准 |
-| `hl_fills(tid PK, address, ts, coin, side, dir, px, sz, fee, closed_pnl, liquidation, hash)` | WS + 导入 | 7d / 永久 | 导入 5 亿行 ≈ 40 GB 压缩后 | UNIQUE(address, tid) |
+| `hl_fills(tid PK, address, ts, symbol, side, dir, price, size, notional_usd, fee_usd, closed_pnl_usd, liquidation, hash)` | WS + 导入 | 7d / 永久 | 导入 5 亿行 ≈ 40 GB 压缩后 | UNIQUE(address, tid) |
 | `whale_events(id, ts, address, source, coin, type, side, size_delta, notional_delta, px, ret_1h, ret_4h, ret_24h, ret_ref_venue, filled_at)` | 事件 | – / 永久 | – | UNIQUE(address, coin, type, ts_bucket) |
-| `coin_prism_1m(symbol, ts PK, as_of, sources jsonb, venues jsonb, price, chg24h_pct, vol24h_usd, funding_8h, funding_spread, oi_total, oi_pctl_30d, retail, top, taker, whale_share, whale_n, crowding, crowding_pctl_30d, liq24_l, liq24_s)` | 1m | 1d / 2y | 0.43M 行/天 | `/snapshot` 回放的来源 |
+| `coin_prism_1m(symbol, ts PK, as_of, sources jsonb, venues jsonb, price, chg24h_pct, vol24h_usd, funding_8h, funding_apr_pct, funding_spread, oi_total_usd, retail_long_share, top_trader_long_share, taker_buy_share, whale_long_share, whale_long_usd, whale_short_usd, gap_pts, crowding, crowding_pctl_30d, liq_24h_long_usd, liq_24h_short_usd, facets jsonb)` | 1m | 1d / 2y | 0.43M 行/天 | `facets` = 每个分面的 `{value, pctl_30d, n, as_of, tag}`（YAML `Facet`）；`/snapshot` 回放的来源 |
 | `coin_state(symbol, tf, rules_version, ts PK, state, state_start_ts, confirmed, hits jsonb, features jsonb)` | K 线收盘 | – / 永久 | 小 | |
 | `sentence_log(symbol, page, ts PK, inputs_hash, inputs jsonb, template_id, contradiction_template_id, tags text[], rules_version)` | 变化时 | – / 1y | 小 | UNIQUE(symbol, page, inputs_hash)；不存文本 |
 | `market_events(id, ts, type, symbol, severity, vars jsonb, template_id, replay_at)` | 事件 | – / 2y | 小 | |
 | `liq_cascades(id, symbol, side, start_ts, end_ts, notional_usd, price_move_pct, pctl_30d)` | 事件 | – / 永久 | 小 | |
-| `scorecard_daily(date, group_key, horizon, rules_version, n, n_effective, median, p25, p75, hit_rate, wilson_low, wilson_high, q_value, tag)` | 日 | – / 永久 | 小 | `group_key` 来自 `config/scorecard_groups.yaml` |
+| `scorecard_daily(date, group_key, horizon, rules_version, n, n_effective, median_ret, p25, p75, hit_rate, wilson_low, wilson_high, q_value, p_break_low, tag)` | 日 | – / 永久 | 小 | `group_key` 来自 `config/scorecard_groups.yaml`；`p_break_low` 供 `StateStats` |
+| `coin_meta(symbol, mcap_usd, circulating, updated_ts)` | 10m | – / 当前 | 小 | CoinGecko 免 key（5–15 次/分），供 `oi_to_mcap` |
+| `source_health_1m(ts, venue, kind, ok bool, latency_ms)` | 1m | 1d / 90d | 小 | `uptime_30d` 与状态页来源 |
 | `macro(ts, key, value)` | 1h/1d | – / 永久 | 小 | |
 | `ingest_watermark(venue, symbol, kind, tf, last_closed_ts, gaps jsonb)` | – | – | – | 断线补齐依据 |
-| `source_health(venue, kind, last_ok_ts, latency_ms, http_status, consecutive_fail)` | – | – | – | |
+| `source_health(venue, kind, last_ok_ts, latency_ms, http_status, consecutive_fail)` | – | – | – | 当前态 |
 | `alert_state(rule_id PK, last_value, last_fired_ts, hour_bucket, fires_this_hour)` | – | – | – | |
-| 业务表 | `users, sessions, api_keys(hash), user_positions(client_id UNIQUE per user), watchlist, alert_rules, alert_deliveries, push_subscriptions, wallets(address PK, source, name, labels[], discovered_by, tier, first_seen, last_seen), wallet_optout, feature_flags, audit_log, analytics_events(event, path, ref, ts)` |
+| 业务表 | `users, sessions, api_keys(hash), user_positions(client_id UNIQUE per user), watchlist, alert_rules, alert_deliveries, push_subscriptions, wallets(address PK, source, name, labels[], discovered_by, tier, first_seen, last_seen), wallet_optout, feature_flags, audit_log, analytics_events(event, path, ref, ts)`。派生：`Wallet.followers` = watchlist 中该地址计数；`Wallet.style_tags` 由 `whale_events` 每日派生（持仓时长、杠杆偏好、方向偏好）。 |
 容量：正常日增约 1.5 GB 压缩前、约 0.3 GB 压缩后；年增约 110 GB 含 fills 导入；两台各需 ≥ 200 GB 盘（S0 核实）。
 
 ## 4. 服务设计
@@ -74,7 +76,7 @@ make calibrate # analytics/calibrate_states.py → docs/reports/
 ### 4.1 采集（东京）
 - **WS 优先**：Binance `!markPrice@arr@1s`（全市场标记价与费率）、`!forceOrder@arr`；Bybit `tickers` + `allLiquidation`；OKX `mark-price` + `liquidation-orders`；HL `allMids` + `trades`（大额发现）。心跳、指数退避重连（1→60s）、序号与时间校验、断线后按 `ingest_watermark` 用 REST 补齐。
 - **REST 全市场端点**：Bybit `/v5/market/tickers?category=linear`、OKX `/market/tickers?instType=SWAP`、Binance `/fapi/v1/premiumIndex`（无 symbol 参数返回全部）、OI 用各所批量端点或按币每分钟；多空比逐币 5 分钟。
-- **限速预算（`venues.yaml`，取官方上限 40%）**：Binance 2400 权重/分 → 预算 960（全市场 tickers 40 + OI 300 币 × 1/min × 1 = 300 + 多空比 300 × 3 kinds / 5min × 1 ≈ 180 + 深度 50 × 2 × 10 / min = 1000 → 深度降为 2 分钟一次 500）；Bybit 120/min → 48；OKX 20/2s → 8/2s；HL 1200 权重/分 → 600（`metaAndAssetCtxs` 20/min + hot 200 钱包 `clearinghouseState` 2 × 200 = 400 + warm 800 / 10 min × 2 = 160 = 580 ✓；fills 不走 REST）。
+- **限速预算（`venues.yaml`，取官方上限 40%）**：Binance 2400 权重/分 → 预算 960（全市场 premiumIndex 10 + OI 300 币 × 1/min × 1 = 300 + 多空比 300 × 3 kinds / 5min × 1 ≈ 180 + K 线补齐预留 200 ≈ 690 ✓；不采集盘口深度）；宏观：CoinGecko `global` 与市值每 10 分钟 2 次、DefiLlama 与 F&G 每小时；Bybit 120/min → 48；OKX 20/2s → 8/2s；HL 1200 权重/分 → 600（`metaAndAssetCtxs` 20/min + hot 200 钱包 `clearinghouseState` 2 × 200 = 400 + warm 800 / 10 min × 2 = 160 = 580 ✓；fills 不走 REST）。
 - **HL fills**：WS `userFills` 订阅 hot 200（WS 上限 1000 订阅 / 100 连接，留余量）；warm 钱包每 10 分钟 `userFillsByTime`（权重 20，≤ 20 个/分钟）。
 - 每源熔断：连续 5 次失败停 5 分钟；写 `source_health`；`venues.yaml` 维护每所域名列表（生产用规范域名，非美 VPS）。
 - 符号上下架、费率周期变更（Binance/Bybit/Bitget 有 1h/4h 符号）由 `instruments` 每小时刷新驱动。
@@ -102,7 +104,7 @@ FastAPI；读路径返回 Redis 预序列化 + br 压缩字节（不过 pydantic
 见 01-FEATURES §6–§7。
 
 ### 4.7 导入（hub → 东京）
-`apps/importer`：在 hub 上用 DuckDB 读 `curated/hl/{fill_history,fill,position,liquidation,leaderboard,account_snapshot}`，按 `dt` 分区导出为 CSV 流经 Tailscale `psql \copy` 到东京 staging，再 `ON CONFLICT DO NOTHING` 进主表；字段映射：`px→price, sz→size, time_ms→ts, coin→symbol(经 instruments), closed_pnl→closed_pnl_usd, liquidation_user IS NOT NULL→liquidation`；导入后跑同一 `whale-engine` 事件识别与回填；导入报告写 `docs/reports/import-YYYYMMDD.md`（行数、去重、时间覆盖）。首批：fill_history 全量 + fill + position 42 天，预计 2–3 天完成。
+`apps/importer`：在 hub 上用 DuckDB 读 `curated/hl/{fill_history,fill,position,liquidation,leaderboard,account_snapshot}`，按 `dt` 分区导出为 CSV 流经 Tailscale `psql \copy` 到东京 staging，再 `ON CONFLICT DO NOTHING` 进主表；字段映射：`px→price, sz→size, time_ms→ts, coin→symbol(经 instruments), closed_pnl→closed_pnl_usd, liquidation_user IS NOT NULL→liquidation`；导入后跑同一 `whale-engine` 事件识别与回填；导入报告写 `docs/reports/import-YYYYMMDD.md`（行数、去重、时间覆盖）。同时导入 `funding`（多所费率历史）与 `kline`（回填事件后收益的参考价）。首批：fill_history 全量 + fill + position 42 天 + funding + kline，预计 2–3 天完成。
 
 ## 5. 状态规则文件（v1，仅价格类）
 ```yaml
@@ -133,7 +135,7 @@ PR：lint + gen 无 diff + 测试 + 构建镜像。main：推 GHCR → SSH 部�
 运行手册（`docs/runbooks/`）：源故障 · 交易所封 IP · 符号上下架与改名 · 费率周期变更 · 时钟偏移 · 压缩任务卡死与回填解压 · CAGG 刷新积压 · Redis OOM · 磁盘满 · 数据库故障切换与脑裂检查 · 证书与隧道断 · 告警风暴 · API key 泄露 · Telegram/Tunnel 令牌轮换 · hub 导入重跑。
 
 ## 10. 安全
-Tunnel 无公网端口；魔法链接 15 分钟；Cookie `HttpOnly Secure SameSite=Lax`；API key 哈希存储只显示一次，创建仅限 session；CSRF；pydantic 校验；参数化 SQL；Webhook（v1.1）SSRF 防护：解析后 pin IP、禁私网/回环/链路本地/元数据地址、禁跳转、仅 443、5s 超时、响应 ≤ 64 KB、HMAC 签名；Dependabot；秘钥不入库；审计日志；GDPR 导出与删除（30 天宽限）；隐私与条款页；钱包 opt-out 流程。
+Tunnel 无公网端口；魔法链接 15 分钟；Cookie `HttpOnly Secure SameSite=Lax`；API key 哈希存储只显示一次，创建仅限 session；CSRF；pydantic 校验；参数化 SQL；Webhook（v1.1，本期不实现）SSRF 防护：解析后 pin IP、禁私网/回环/链路本地/元数据地址、禁跳转、仅 443、5s 超时、响应 ≤ 64 KB、HMAC 签名；Dependabot；秘钥不入库；审计日志；GDPR 导出与删除（30 天宽限）；隐私与条款页；钱包 opt-out 流程。
 
 ## 11. 编码规范
 Python：ruff + mypy strict，pydantic v2，async 优先，函数 ≤ 60 行；TS：strict，无 any，组件 ≤ 200 行；命名与 YAML 一致；提交 `type(scope): summary`；一个 PR 一个目的。

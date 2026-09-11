@@ -18,7 +18,7 @@
 - 认证：公共 GET 免认证；`/me/*` 接受 `session`（Bearer）或 `apiKey`（`X-API-Key`）；创建 API key 只允许 session。
 - 限流：键 = `CF-Connecting-IP`（校验对端在 Cloudflare 网段）+ API key；匿名 30/min、免费 60/min、Pro 600/min；响应头 `X-RateLimit-Limit/Remaining/Reset`；超限 `429` + `Retry-After`。
 - 缓存：公共 GET 带 `Cache-Control: public, max-age=N, s-maxage=N, stale-while-revalidate=600` 与 `ETag`；N 见各端点 `x-hlens-cache`；Cloudflare Cache Rule 覆盖 `/v1/*` 并包含查询串。
-- 错误：`Error{code, message, details?, request_id}`；所有端点声明 400/401/429/500。
+- 错误：`Error{code, message, details?, request_id}`；公共 GET 声明 429/500（带参数的另加 400，带路径参数的另加 404）；`/me/*` 声明 401 与 400/404。
 - 列表：统一封套 `{as_of, sources, items[], next_cursor}`；`limit ≥ 1`；`cursor` 不透明。
 - 时间参数：毫秒整数。
 - 降级：聚合对象含 `as_of` 与 `sources{venue: ok|stale|error}`。
@@ -40,10 +40,10 @@
 ## 4. WebSocket `/v1/stream`
 - 客户端：`StreamSubscribe{op: subscribe|unsubscribe, channels[]}`；服务端：`StreamMessage{ch, seq, ts, data}`，`seq` 由 Redis `INCR` 全局单调；心跳 15s `ping`/`pong`；60s 无消息重连并退化 10s 轮询。
 - 频道与负载：`prism:{symbol}` → `PrismPatch`（Merge Patch）· `state:{symbol}` → `MarketState` · `liq:*`/`liq:{symbol}` → `LiqBatch`（250ms 聚合，订阅可带 `min_usd`）· `whale:events` / `whale:{address}` → `WhaleEvent` · `events:*` → `Event`。
-- 订阅上限：匿名 8、登录 20、Pro 50。
+- 订阅上限：匿名 8、登录 20、Pro 50（YAML `x-hlens-ws.subscription_limits`）。
 
 ## 5. MCP（`/mcp`，Streamable HTTP）
-工具名 = `operationId`；输入输出直接引用 YAML schema。额外工具 `explainCoin`（有 REST 对应）与 `createAlert`（需 API key）。
+带 `x-hlens-mcp` 的 33 个 operation 暴露为 MCP 工具，工具名 = `operationId`，输入输出直接引用 YAML schema；`createAlert` 需 API key。
 
 ## 6. 静态快照层
-GitHub Pages 的 `data/latest.json` 是**独立 schema** `SnapshotFile`（v0.1 字段名），不是 `Prism` 子集；S1 起由 API 生成并迁移到 `Prism` 字段名，旧字段保留一个版本后删除。
+GitHub Pages 的 `data/latest.json` 是**独立 schema** `SnapshotFile`（`schema: 1`，v0.1 字段名如 `coin`、`exchange`、`funding_annualized_pct`），不是 `Prism` 子集；S1 起由 API 生成并迁移到 `Prism` 字段名（`schema: 2`），`schema: 1` 保留一个版本后删除。

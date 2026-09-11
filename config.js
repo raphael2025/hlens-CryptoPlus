@@ -9,8 +9,7 @@ window.HLENS_CONFIG = {
   community: {
     telegram: "",   // e.g. "https://t.me/your_group"
     discord: "",    // e.g. "https://discord.gg/xxxx"
-    x: "",          // e.g. "https://x.com/your_handle"
-    wechat: ""      // a public image URL of your group QR code, e.g. "assets/wechat.png"
+    x: ""           // e.g. "https://x.com/your_handle"
   },
   // Data files produced by scripts/fetch.py (relative to index.html)
   dataBase: "data/",

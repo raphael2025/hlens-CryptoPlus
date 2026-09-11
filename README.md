@@ -15,7 +15,7 @@ Live site: `https://raphael2025.github.io/hlens-CryptoPlus/` · Free · Open sou
 Coinglass and friends show *what* the numbers are. hlens is built around three things they do not do:
 
 1. **Decomposition, not aggregation.** One coin, all participants side by side. The gap between retail and whales is the headline, not a footnote.
-2. **Evidence labels.** Every interpretive sentence on the site is tagged: verified on data / heuristic / opinion. See [docs/SPEC.md](docs/SPEC.md).
+2. **Evidence labels.** Every interpretive sentence on the site is tagged: verified / self-validated / heuristic / opinion / insufficient sample / model estimate. See [docs/00-PROJECT.md](docs/00-PROJECT.md).
 3. **Machine-readable by design.** Everything the page renders is a static JSON file you can `fetch` from anywhere, and the same files will back an MCP server for AI agents.
 
 ## Run locally
@@ -25,16 +25,16 @@ python3 scripts/fetch.py        # ~3 min, writes data/latest.json + data/history
 python3 -m http.server 8765     # then open http://localhost:8765
 ```
 
-Edit `config.js` to set community links (Telegram / Discord / X / WeChat QR) and the GitHub URL.
+Edit `config.js` to set community links (Telegram / Discord / X) and the GitHub URL.
 
 ## Data (public JSON)
 
 | File | Contents |
 |---|---|
 | `data/latest.json` | full snapshot: `coins[]` (prism facets + per-exchange rows), `whales` (wallets, by_coin, top_positions), `macro`, `sources` |
-| `data/history.json` | last 7 days of `[price, funding_8h, oi_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
+| `data/history.json` | last 7 days of `[price, funding_8h, oi_total_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
 
-Schema of the static snapshot is a subset of the production contract. The project is documented as a four-part set: [docs/00-PROJECT.md](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [docs/01-FEATURES.md](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [docs/02-API.md](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [docs/03-DEVELOPMENT.md](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment). Older drafts live in `docs/archive/`; review records in `docs/reviews/`.
+The static snapshot (`data/latest.json`) is an independent v0.1 schema (`SnapshotFile` in the contract); from stage S1 it migrates to the production `Prism` field names. The project is documented as a four-part set: [docs/00-PROJECT.md](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [docs/01-FEATURES.md](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [docs/02-API.md](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [docs/03-DEVELOPMENT.md](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment). Older drafts live in `docs/archive/`; review records in `docs/reviews/`.
 
 ## Sources
 
@@ -50,6 +50,6 @@ hlens is a research tool. Nothing here is investment advice. Leveraged perpetual
 
 **一个币，所有角度。** hlens 把一个合约市场分解成里面的人：散户、大账户、链上大户，横跨 Binance、Bybit、OKX 和 Hyperliquid。三方意见相左，就是信号。
 
-免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。产品方案与页面细节见 [docs/SPEC.md](docs/SPEC.md)。
+免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。项目、功能、契约与开发文档见 `docs/00-PROJECT.md` 起的四份文件。
 
 本站是研究工具，不构成投资建议。带杠杆的永续合约可能亏损超过本金。

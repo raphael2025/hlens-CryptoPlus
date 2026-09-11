@@ -21,6 +21,7 @@ tags:
   - { name: me, description: "Authenticated user resources" }
 x-hlens-ws:
   url: /v1/stream
+  subscription_limits: { anonymous: 8, free: 20, pro: 50 }
   subscribe: "#/components/schemas/StreamSubscribe"
   message: "#/components/schemas/StreamMessage"
   channels:
@@ -700,7 +701,7 @@ paths:
       tags: [me]
       summary: Subscribe / unsubscribe the daily digest
       security: [ { session: [] }, { apiKey: [] } ]
-      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [enabled, channel], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/Channel" } } } } } }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [enabled, channel], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/DigestChannel" } } } } } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -801,9 +802,10 @@ components:
     Address: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" }
     Currency: { type: string, enum: [BTC, ETH] }
     Locale: { type: string, enum: [en, zh], default: en }
-    Venue: { type: string, enum: [binance, bybit, okx, gate, bitget, hyperliquid, deribit] }
+    Venue: { type: string, enum: [binance, bybit, okx, gate, bitget, hyperliquid, deribit], description: "gate, bitget and deribit are v1.1 venues; v1 emits binance, bybit, okx, hyperliquid" }
     Side: { type: string, enum: [long, short] }
     Channel: { type: string, enum: [telegram, email, push] }
+    DigestChannel: { type: string, enum: [telegram, push], description: email digests are not offered (Resend free tier) }
     Preset: { type: string, enum: [short_concentration_high, long_concentration_high, retail_vs_whale, oi_surge, negative_funding, whale_flip, pullback_shallow, squeeze] }
     HistoryField: { type: string, enum: [price, crowding, funding_8h, oi_total_usd, oi_usd, retail_long_share, top_trader_long_share, taker_buy_share, whale_long_share, whale_net_usd, liq_long_usd, liq_short_usd] }
     EvidenceTag: { type: string, enum: [verified, self_validated, heuristic, opinion, insufficient, model_estimated] }
@@ -859,7 +861,7 @@ components:
     StateGroup: { type: string, enum: [up, down, range, squeeze, transition] }
     StateId:
       type: string
-      description: 16 states; group membership is defined in config/state_rules.v{n}.yaml
+      description: "16 states; group membership is defined in config/state_rules.v{n}.yaml. up_pullback_leveraged, down_bounce_leveraged and down_capitulation need OI/liquidation features and are only emitted by rules v2 (v1.1)."
       enum: [up_impulse, up_pullback_shallow, up_pullback_leveraged, up_overheated, up_exhaustion,
              down_impulse, down_bounce_shallow, down_bounce_leveraged, down_capitulation, down_exhaustion,
              range_top, range_mid, range_bottom, squeeze, breakout_pending, false_breakout]
@@ -956,7 +958,7 @@ components:
         sources: { $ref: "#/components/schemas/SourceStatus" }
         price: { $ref: "#/components/schemas/NullableNumber" }
         chg24h_pct: { $ref: "#/components/schemas/NullableNumber" }
-        vol24h_total_usd: { $ref: "#/components/schemas/NullableNumber" }
+        vol24h_usd: { $ref: "#/components/schemas/NullableNumber" }
         facets: { $ref: "#/components/schemas/Facets" }
         crowding: { type: [number, "null"], minimum: -1, maximum: 1 }
         crowding_pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
@@ -1049,7 +1051,7 @@ components:
         atr14: { type: number }
         atr_pctl_90d: { type: number }
         regime: { type: string, enum: [low, normal, high, extreme] }
-        implied_daily_pct: { $ref: "#/components/schemas/NullableNumber" }
+        implied_daily_pct: { $ref: "#/components/schemas/NullableNumber", description: "from Deribit; null until options land (v1.1)" }
         realized_24h_pct: { type: number }
     Move15m:
       type: object
@@ -1082,7 +1084,6 @@ components:
         level: { $ref: "#/components/schemas/KeyLevel" }
         ts: { $ref: "#/components/schemas/Ts" }
         oi_chg_pct: { $ref: "#/components/schemas/NullableNumber" }
-        cvd_dir: { type: [string, "null"] }
         vol_ratio: { $ref: "#/components/schemas/NullableNumber" }
         verdict: { type: string, enum: [aligned, mixed] }
     Drivers:
@@ -1749,8 +1750,8 @@ components:
         lang: { $ref: "#/components/schemas/Locale" }
         tz: { type: string }
         telegram_linked: { type: boolean }
-        digest: { type: object, required: [enabled], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/Channel" } } }
-        limits: { type: object, properties: { alerts: { type: integer }, api_per_min: { type: integer }, ws_subscriptions: { type: integer }, watch_wallets: { type: integer } } }
+        digest: { type: object, required: [enabled], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/DigestChannel" } } }
+        limits: { type: object, properties: { alerts: { type: integer }, api_per_min: { type: integer }, ws_subscriptions: { type: integer }, watch_wallets: { type: integer } }, examples: [ { alerts: 5, api_per_min: 60, ws_subscriptions: 20, watch_wallets: 10 } ] }
     MeUpdate:
       type: object
       properties:
@@ -1797,7 +1798,7 @@ components:
     AlertScope: { type: string, enum: [position, coin, wallet, market] }
     AlertMetric:
       type: string
-      enum: [funding_8h, funding_spread, oi_chg_pct, liq_1h_usd, cascade, whale_event, whale_near_liq, gap_pts, crowding, price, state_change, liq_distance_pct]
+      enum: [funding_8h, funding_apr_pct, funding_spread, oi_chg_pct, liq_1h_usd, cascade, whale_event, whale_near_liq, gap_pts, crowding, price, state_change, liq_distance_pct]
     AlertRuleInput:
       type: object
       required: [scope, metric, op, channels]
@@ -1896,6 +1897,7 @@ components:
         schema: { type: integer }
         generated_at: { $ref: "#/components/schemas/Ts" }
         generated_iso: { type: string }
+        elapsed_s: { type: number }
         sources: { type: object, additionalProperties: { type: string } }
         coins: { type: array, items: { type: object, additionalProperties: true } }
         macro: { type: object, additionalProperties: true }

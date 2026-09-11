@@ -52,7 +52,7 @@
       "ins.fund.d": "{a}% annualised · {oi} OI",
       "tp.coin": "Coin", "tp.side": "Side", "tp.notional": "Notional", "tp.entry": "Entry", "tp.mark": "Mark", "tp.liq": "Liq. px", "tp.lev": "Lev", "tp.upnl": "uPnL", "tp.wallet": "Wallet",
       "w.rank": "#", "w.wallet": "Wallet", "w.acct": "Account", "w.pnl1d": "1d PnL", "w.pnl7d": "7d PnL", "w.pnl30d": "30d PnL", "w.roi30d": "30d ROI", "w.bias": "Bias", "w.pos": "Positions",
-      "join.telegram": "Telegram", "join.discord": "Discord", "join.x": "X / Twitter", "join.wechat": "WeChat group",
+      "join.telegram": "Telegram", "join.discord": "Discord", "join.x": "X / Twitter",
       "mood.h": "Crowd mood", "mood.tag": "one lens, not a fact", "mood.fng": "Fear & Greed index (alternative.me)",
       "mood.hint": "A reading of how the crowd tends to behave in each regime. It fits some traders' experience and not others'. Use it as a mirror, not a forecast.",
       "mood.0": "Extreme fear (0–25): capitulation. Retail sells the lows, funding often goes negative, shorts get crowded.",
@@ -106,7 +106,7 @@
       "ins.fund.d": "年化 {a}% · 持仓 {oi}",
       "tp.coin": "币种", "tp.side": "方向", "tp.notional": "名义价值", "tp.entry": "开仓价", "tp.mark": "标记价", "tp.liq": "强平价", "tp.lev": "杠杆", "tp.upnl": "浮盈亏", "tp.wallet": "钱包",
       "w.rank": "#", "w.wallet": "钱包", "w.acct": "账户价值", "w.pnl1d": "1 日盈亏", "w.pnl7d": "7 日盈亏", "w.pnl30d": "30 日盈亏", "w.roi30d": "30 日 ROI", "w.bias": "净方向", "w.pos": "持仓",
-      "join.telegram": "Telegram", "join.discord": "Discord", "join.x": "X / Twitter", "join.wechat": "微信群",
+      "join.telegram": "Telegram", "join.discord": "Discord", "join.x": "X / Twitter",
       "mood.h": "散户心理", "mood.tag": "一种视角，不是事实", "mood.fng": "恐惧贪婪指数（alternative.me）",
       "mood.hint": "对人群在不同情绪区间典型行为的一种解读。对一部分交易者来说很准，对另一部分未必。把它当镜子，不要当预测。",
       "mood.0": "极度恐惧（0–25）：投降。散户在低点割肉，资金费率常转负，空头开始拥挤。",
@@ -314,7 +314,6 @@
     if (c.telegram) links.push(`<a class="btn btn-primary" href="${h(c.telegram)}" target="_blank" rel="noopener">${t("join.telegram")}</a>`);
     if (c.discord) links.push(`<a class="btn" href="${h(c.discord)}" target="_blank" rel="noopener">${t("join.discord")}</a>`);
     if (c.x) links.push(`<a class="btn" href="${h(c.x)}" target="_blank" rel="noopener">${t("join.x")}</a>`);
-    if (c.wechat) links.push(`<div><div class="hint">${t("join.wechat")}</div><img src="${h(c.wechat)}" alt="WeChat QR"></div>`);
     $("#join-links").innerHTML = links.join("");
     $("#join-empty").classList.toggle("hidden", links.length > 0);
     ["#gh-link", "#gh-link-2"].forEach((s) => { $(s).href = CFG.github || "#"; });
