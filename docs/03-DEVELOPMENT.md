@@ -1,4 +1,6 @@
-# hlens · 开发与运维文档（v3.1）
+# hlens · 开发与运维文档（v3.2）
+
+> v3.2：按 `04-ARCHITECTURE-REVIEW.md`（仓库级审查）修正：hub 数据生产者、`hl_fills` 主键、HL 限速细节、导入流程、hlens-core 复用包、Docker 服务清单见 `05-DOCKER.md`。
 
 ## 1. 仓库结构（monorepo）
 ```
@@ -10,7 +12,8 @@ apps/whale-engine 候选池、状态、fills、事件、回填（东京）
 apps/analytics    prism/state/sentence/context/levels/cascade/scorecard/calibrate（东京）
 apps/alert-engine 规则评估与投递（东京）
 apps/importer     hub 历史数据导入（DuckDB → Postgres）
-packages/hlens-core  Python 共享：适配器、指标、状态规则、句子引擎、DB
+packages/hlens-core  Python 共享：contracts（自 hlens）、qa（自 hlens assertions）、catalog（自 hlens + CI 门禁）、ratelimit（自 hlens hyperliquid/budget）、preflight（自 hlens node）、instruments、db（自 smip database/config）、adapters（自 hlens-dashboard base/cache/registry + fetch.py 六所函数）、指标、状态规则、句子引擎
+apps/snapshot     由 scripts/fetch.py 改写：读本地 API → data/latest.json（schema 2）→ 推 Pages（降级层）
 packages/hlens-mcp   PyPI 包
 packages/ui          前端共享组件
 config/  state_rules.v1.yaml · sentence_templates.{zh,en}.yaml · venues.yaml · calendar_macro.json · scorecard_groups.yaml（预注册分组）· evidence.yaml（证据库，`listEvidence` 数据源）
@@ -18,7 +21,7 @@ docs/changelog.md                    # `listChangelog` 数据源（构建时解�
 db/migrations（Alembic；CAGG 用 autocommit 迁移）
 deploy/  compose.tokyo.yml · compose.sg.yml · compose.staging.yml · Caddyfile · cloudflared/ · prometheus/ · grafana/ · scripts/{deploy,backup,restore,failover,promote}.sh
 tests/{unit,contract,golden,integration}
-scripts/fetch.py · data/            # v0.1 静态快照层（降级模式）
+scripts/fetch.py · data/            # v0.1 静态快照层；S1 前保持在线，改造在 apps/snapshot 里做，不原地改
 docs/ · docs/runbooks/ · docs/reports/
 ```
 
@@ -52,10 +55,10 @@ make calibrate # analytics/calibrate_states.py → docs/reports/
 | `klines(ts, venue, symbol, tf, o,h,l,c,v, taker_buy_v)` | 1m 参考所 | 1m:30d，1h/1d 由层级 CAGG 永久 | 0.4M 行/天 | 参考所 = Binance（美区外） |
 | `liquidations(ts, venue, symbol, side, price, size, notional_usd, cascade_id, throttled_source)` | 实时 | 1d / 2y | 峰值日 1M 行 | Binance/Bybit 为限流下界 |
 | `hl_asset_ctx(ts, coin, mark, funding_1h, oi, premium, vlm)` | 1m | 1d / 2y | 0.34M 行/天 | |
-| `hl_wallet_state(ts, address, account_value, margin_used)` | hot 1m / warm 10m | 1d / 1y | 0.4M 行/天 | |
-| `hl_positions(ts, address, coin, side, size, notional, entry, liq, lev, upnl, is_cross, liq_px_reliable)` | 同上 | 1d / 1y | 1M 行/天 | 对账用；事件以 fills 为准 |
-| `hl_fills(tid PK, address, ts, symbol, side, dir, price, size, notional_usd, fee_usd, closed_pnl_usd, liquidation, hash)` | WS + 导入 | 7d / 永久 | 导入 5 亿行 ≈ 40 GB 压缩后 | UNIQUE(address, tid) |
-| `whale_events(id, ts, address, source, coin, type, side, size_delta, notional_delta, px, ret_1h, ret_4h, ret_24h, ret_ref_venue, filled_at)` | 事件 | – / 永久 | – | UNIQUE(address, coin, type, ts_bucket) |
+| `hl_wallet_state(ts, address, account_value, margin_used, total_ntl_pos, withdrawable)` | hot 1m / warm 10m | 1d / 1y | 0.4M 行/天 | 权益曲线来源 |
+| `hl_positions(ts, address, symbol, side, size, notional_usd, entry, liq, lev, lev_type, max_leverage, margin_used, upnl_usd, roe, is_cross, liq_px_reliable)` | 同上 | 1d / 1y | 1M 行/天 | 对账用；事件以 fills 为准。cross 仓位的 `liq` 语义是"其他仓位不变时"，不可跨仓位累加；`liq_px_reliable=false` 的仓位不进 RektSoonBoard |
+| `hl_fills(address, tid, content_hash, ts, ingest_ts, symbol, side, dir, start_position, price, size, notional_usd, fee, fee_token, fee_usd, closed_pnl_usd, oid, crossed, hash, liquidation, liquidation_method, liquidation_mark_px)` | WS + 导入 | 7d / 永久 | 导入 5 亿行 ≈ 40 GB 压缩后 | **PK(address, tid, content_hash)**：hub 实测 207,635 条 `tid=0`，`tid` 单独不唯一；`content_hash` = sha1(ts, symbol, side, price, size, dir)。`notional_usd = price × size` 派生；`fee_usd` 按 `fee_token` 换算；过滤 `@` 开头或含 `/` 的现货 coin；`liquidation = liquidation_user IS NOT NULL`（注意 `"liquidation": null` 键的陷阱，不能用字符串匹配） |
+| `whale_events(id, ts, ts_bucket, address, source, symbol, type, side, size_delta, notional_delta_usd, price, src_tid, src_hash, ret_1h, ret_4h, ret_24h, ret_ref_venue, filled_at)` | 事件 | – / 永久 | – | UNIQUE(address, symbol, type, ts_bucket)；`src_tid`/`src_hash` 供页面"可点验证链接"回链 |
 | `coin_prism_1m(symbol, ts PK, as_of, sources jsonb, venues jsonb, price, chg24h_pct, vol24h_usd, funding_8h, funding_apr_pct, funding_spread, oi_total_usd, retail_long_share, top_trader_long_share, taker_buy_share, whale_long_share, whale_long_usd, whale_short_usd, gap_pts, crowding, crowding_pctl_30d, liq_24h_long_usd, liq_24h_short_usd, facets jsonb)` | 1m | 1d / 2y | 0.43M 行/天 | `facets` = 每个分面的 `{value, pctl_30d, n, as_of, tag}`（YAML `Facet`）；`/snapshot` 回放的来源 |
 | `coin_state(symbol, tf, rules_version, ts PK, state, state_start_ts, confirmed, hits jsonb, features jsonb)` | K 线收盘 | – / 永久 | 小 | |
 | `sentence_log(symbol, page, ts PK, inputs_hash, inputs jsonb, template_id, contradiction_template_id, tags text[], rules_version)` | 变化时 | – / 1y | 小 | UNIQUE(symbol, page, inputs_hash)；不存文本 |
@@ -68,7 +71,7 @@ make calibrate # analytics/calibrate_states.py → docs/reports/
 | `ingest_watermark(venue, symbol, kind, tf, last_closed_ts, gaps jsonb)` | – | – | – | 断线补齐依据 |
 | `source_health(venue, kind, last_ok_ts, latency_ms, http_status, consecutive_fail)` | – | – | – | 当前态 |
 | `alert_state(rule_id PK, last_value, last_fired_ts, hour_bucket, fires_this_hour)` | – | – | – | |
-| 业务表 | `users, sessions, api_keys(hash), user_positions(client_id UNIQUE per user), watchlist, alert_rules, alert_deliveries, push_subscriptions, wallets(address PK, source, name, labels[], discovered_by, tier, first_seen, last_seen), wallet_optout, feature_flags, audit_log, analytics_events(event, path, ref, ts)`。派生：`Wallet.followers` = watchlist 中该地址计数；`Wallet.style_tags` 由 `whale_events` 每日派生（持仓时长、杠杆偏好、方向偏好）。 |
+| 业务表 | `users, sessions, api_keys(hash), user_positions(client_id UNIQUE per user), watchlist, alert_rules, alert_deliveries, push_subscriptions, wallets(address PK, source, name, labels[], discovered_by, tier, perp_equity_usd, has_perp, has_position, fills_empty_terminal, first_seen, last_seen), wallet_optout, feature_flags, audit_log, analytics_events(event, path, ref, ts)`。派生：`Wallet.followers` = watchlist 中该地址计数；`Wallet.style_tags` 移植 hlens_V3 `style-tagger`（whale/veteran/high_freq/stable/concentrated，high_freq 用于剔除做市商）；钱包评分移植 hlens_V4 `backtest/pit.py`（PIT 六维，含无前视断言），**不用** V3 `grade-calculator`。分层依据是 `perp_equity_usd`（`clearinghouseState`），不是榜单 `account_value`（含现货，实测偏差可达四个数量级）；`fills_empty_terminal=true` 的地址不再重试 fills。 |
 容量：正常日增约 1.5 GB 压缩前、约 0.3 GB 压缩后；年增约 110 GB 含 fills 导入；两台各需 ≥ 200 GB 盘（S0 核实）。
 
 ## 4. 服务设计
@@ -77,13 +80,14 @@ make calibrate # analytics/calibrate_states.py → docs/reports/
 - **WS 优先**：Binance `!markPrice@arr@1s`（全市场标记价与费率）、`!forceOrder@arr`；Bybit `tickers` + `allLiquidation`；OKX `mark-price` + `liquidation-orders`；HL `allMids` + `trades`（大额发现）。心跳、指数退避重连（1→60s）、序号与时间校验、断线后按 `ingest_watermark` 用 REST 补齐。
 - **REST 全市场端点**：Bybit `/v5/market/tickers?category=linear`、OKX `/market/tickers?instType=SWAP`、Binance `/fapi/v1/premiumIndex`（无 symbol 参数返回全部）、OI 用各所批量端点或按币每分钟；多空比逐币 5 分钟。
 - **限速预算（`venues.yaml`，取官方上限 40%）**：Binance 2400 权重/分 → 预算 960（全市场 premiumIndex 10 + OI 300 币 × 1/min × 1 = 300 + 多空比 300 × 3 kinds / 5min × 1 ≈ 180 + K 线补齐预留 200 ≈ 690 ✓；不采集盘口深度）；宏观：CoinGecko `global` 与市值每 10 分钟 2 次、DefiLlama 与 F&G 每小时；Bybit 120/min → 48；OKX 20/2s → 8/2s；HL 1200 权重/分 → 600（`metaAndAssetCtxs` 20/min + hot 200 钱包 `clearinghouseState` 2 × 200 = 400 + warm 800 / 10 min × 2 = 160 = 580 ✓；fills 不走 REST）。
-- **HL fills**：WS `userFills` 订阅 hot 200（WS 上限 1000 订阅 / 100 连接，留余量）；warm 钱包每 10 分钟 `userFillsByTime`（权重 20，≤ 20 个/分钟）。
+- **HL fills**：WS `userFills` 订阅 hot 200（WS 上限 1000 订阅 / 100 连接，留余量；WS 不消耗 /info 权重）；warm 钱包每 10 分钟 `userFillsByTime`（权重 20，≤ 20 个/分钟）。断线缺口用 `userFillsByTime`（old→new）+ 复合游标（时间 + 该毫秒已见 tid 集合，语义抄 hlens-hub `wallet_cursor`），**不与 `userFills`（new→old）混用**。
+- **HL 限速的三条实测事实（来自 hlens-hub）**：① 真瓶颈是请求数不是权重：`max_inflight` 硬顶 10，超过撞连接限速器吞吐反降；单出口约 200 请求/分。② 两种 429 处置相反：响应体 JSON null = 权重限速 → 退避权重；nginx HTML = 连接限速 → 降并发。③ 预算不是常数：AIMD，撞 429 砍到 75% 并冻结 1 小时；`venues.yaml` 的 1200 是记账口径。**东京出口 IP 必须与 hub 任一 worker 不同**，否则两套限速器互不知情会超发。
 - 每源熔断：连续 5 次失败停 5 分钟；写 `source_health`；`venues.yaml` 维护每所域名列表（生产用规范域名，非美 VPS）。
 - 符号上下架、费率周期变更（Binance/Bybit/Bitget 有 1h/4h 符号）由 `instruments` 每小时刷新驱动。
 
 ### 4.2 大户引擎（东京）
 - 候选池：排行榜每小时（种子，落库 `wallets.discovered_by=leaderboard`）+ WS `trades` 单笔 ≥ 100 万美元地址 + 用户关注。分层 hot（≥ 10 万美元仓位或关注）1m、warm 10m、cold 1h。
-- 事件以 **fills 为权威源**（`dir` 与 `start_position` 判定 open/add/reduce/close/flip），快照只做对账；`near_liq` 由 `hl_positions` 距强平 < 3% 触发；`liquidated` 由 fills.liquidation。
+- 事件以 **fills 为权威源**（`dir` 与 `start_position` 判定 open/add/reduce/close/flip；同一 `oid` 的多笔成交合成一个事件），快照只做对账；`near_liq` 由 `hl_positions` 距强平 < 3% 触发，距离用 `calcLiqDistance`（markPx = |notional / size|，移植 hlens_V3）且必须 `liq_px_reliable=true`；`liquidated` 由 `fills.liquidation`。历史（导入）与实时跑同一套代码。
 - 回填：事件后 1h/4h/24h 用 `klines`（`ret_ref_venue` 记录参考所）。
 - OKX 带单：v1.1；同一事件模型 `source=okx`。
 
@@ -104,7 +108,12 @@ FastAPI；读路径返回 Redis 预序列化 + br 压缩字节（不过 pydantic
 见 01-FEATURES §6–§7。
 
 ### 4.7 导入（hub → 东京）
-`apps/importer`：在 hub 上用 DuckDB 读 `curated/hl/{fill_history,fill,position,liquidation,leaderboard,account_snapshot}`，按 `dt` 分区导出为 CSV 流经 Tailscale `psql \copy` 到东京 staging，再 `ON CONFLICT DO NOTHING` 进主表；字段映射：`px→price, sz→size, time_ms→ts, coin→symbol(经 instruments), closed_pnl→closed_pnl_usd, liquidation_user IS NOT NULL→liquidation`；导入后跑同一 `whale-engine` 事件识别与回填；导入报告写 `docs/reports/import-YYYYMMDD.md`（行数、去重、时间覆盖）。同时导入 `funding`（多所费率历史）与 `kline`（回填事件后收益的参考价）。首批：fill_history 全量 + fill + position 42 天 + funding + kline，预计 2–3 天完成。
+生产者是 hub 机器上的 **`hlens-hub`**（FastAPI 控制面 + 分布式 worker + DuckDB 转 Parquet），不是 GitHub 的 `hlens`。`apps/importer` 在 hub 上**只读**运行（`compose run --rm importer`，挂载 `/mnt/data1/hlens-hub/data/curated:ro`，DuckDB 限 2 线程 / 3 GB，不碰 hub 的 Postgres 控制面），按 `dt` 分区导出 CSV 流经 Tailscale `psql \copy` 到东京 staging，再 `ON CONFLICT DO NOTHING` 进主表。
+- **全量**：`fill_history`（2023-02 → 2026-08，已去重、按成交日分区）、`position`、`account_snapshot`、`liquidation`、`leaderboard`（数值是字符串，`TRY_CAST`）。
+- **持续增量**：`fill` 仍在增长且按**观测日**分区、与历史有约 1.1% 重叠；只取 `time_ms >` 水位的行，去重键 `(address, tid, content_hash)`，水位记 `ingest_watermark`。
+- 字段映射：`px→price, sz→size, time_ms→ts, observed_at→ingest_ts, coin→symbol（经 instruments，过滤现货）, closed_pnl→closed_pnl_usd, fee+fee_token→fee_usd（按币种换算）, liquidation_user IS NOT NULL→liquidation, liquidation_method/liquidation_mark_px 原样, start_position/oid/crossed/hash 原样`。
+- K 线：hub 的 `hl.kline` 实质只有 BTC；300 币历史回填走 Binance data.vision（移植 hlens_V4 `tools/grab_binance_klines.py`）；hub 的 `funding`/`kline` 是 V4 冻结历史（截至 2026-07-25），只作补充。
+- 导入后跑同一 `whale-engine` 事件识别与回填；报告写 `docs/reports/import-YYYYMMDD.md`（行数、去重、时间覆盖、按 `exit_ip` 的来源分布）。首批预计 2–3 天。
 
 ## 5. 状态规则文件（v1，仅价格类）
 ```yaml
@@ -124,9 +133,10 @@ unit（适配器录制快照、指标、状态规则、句子引擎）· golden�
 PR：lint + gen 无 diff + 测试 + 构建镜像。main：推 GHCR → SSH 部署（东京先、新加坡后）；init 容器跑迁移；健康检查后切换；`deploy.sh --rollback`。staging = 新加坡 `compose.staging.yml`（独立 schema）。
 
 ## 8. 部署与高可用
+服务清单、端口、卷、健康检查、限额与 profiles 以 `05-DOCKER.md` 为准；本节只保留拓扑与切换语义。
 - 东京：postgres 主、redis、collector、whale-engine、analytics、alert-engine、cloudflared 连接器 A、待命 api。
 - 新加坡：postgres 只读副本（流复制 + WAL 归档到 R2，`archive_timeout=60`）、redis 副本、api、web、prometheus、grafana、cloudflared 连接器 B。
-- 网络：Tailscale 内网；所有容器端口 `-p <tailnet_ip>:port:port`；Redis `requirepass` + ACL；PG `hostssl` + scram，`pg_hba` 只放 tailnet 段；VPS 防火墙拒绝入站，Docker 规则复核。
+- 网络：Tailscale 内网；所有容器端口 `${TAILNET_IP}:port:port`；Docker 绕过 ufw，必须加 `DOCKER-USER` 链规则拒绝公网口进入容器；Redis `requirepass`（secret 文件）+ ACL；PG `hostssl` + scram，`pg_hba` 只放 tailnet 段。**出站**：容器共用宿主出口 IP（预算按宿主机算），不走 Tailscale exit node；东京出口 IP 不得与 hub worker 相同。
 - 故障：东京挂 → `promote.sh` 在新加坡提升副本（先 fencing：关闭东京 PG、删除触发文件）、切 API 连接串、采集器在新加坡按 `compose.sg.yml --profile collect` 拉起；RPO ≤ 5 分钟、RTO 1 小时（人工）。新加坡挂 → 东京待命 api 接管（Tunnel 双连接器自动）。两处都挂 → Worker 回退 GitHub Pages 快照。
 - 备份：pgBackRest 或 WAL-G → R2：周全量 + 日增量 + WAL；保留 4 份全量；每月恢复演练记录。
 

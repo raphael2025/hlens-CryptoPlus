@@ -46,4 +46,18 @@
 带 `x-hlens-mcp` 的 33 个 operation 暴露为 MCP 工具，工具名 = `operationId`，输入输出直接引用 YAML schema；`createAlert` 需 API key。
 
 ## 6. 静态快照层
-GitHub Pages 的 `data/latest.json` 是**独立 schema** `SnapshotFile`（`schema: 1`，v0.1 字段名如 `coin`、`exchange`、`funding_annualized_pct`），不是 `Prism` 子集；S1 起由 API 生成并迁移到 `Prism` 字段名（`schema: 2`），`schema: 1` 保留一个版本后删除。
+GitHub Pages 的 `data/latest.json` 是**独立 schema** `SnapshotFile`（`schema: 1`），不是 `Prism` 子集；S1 起由 `apps/snapshot` 从 API 生成 `schema: 2`（字段名与 `Prism`/`CoinSummary` 一致），`schema: 1` 保留一个版本后删除。字段映射：
+
+| schema 1（fetch.py） | schema 2（Prism） | 备注 |
+|---|---|---|
+| `coins[].coin` | `symbol` | |
+| `coins[].exchanges[].exchange` | `venues[].venue` | |
+| `funding_annualized_pct` | `funding_apr_pct` | |
+| `oi_total_usd` / `vol24h_total_usd` | `facets.oi_total_usd.value` / `vol24h_usd` | |
+| `retail_long_share` 等平铺 | `facets.*.value`（含 `pctl_30d`, `n`, `tag`） | 新增分位与样本数 |
+| `whale_n` | `facets.whale_long_share.n` | |
+| `exchanges[].liq_long_usd_1h` | `facets.liq_24h_long_usd` | 语义不同，重算 |
+| `next_funding_ms` | `next_funding_ts` | |
+| `whales.wallets[].account_value` / `pnl_day` / `roi_month` | `account_value_usd` / `pnl_1d_usd` / `roi_30d` | |
+| `whales.top_positions[].notional` / `upnl` | `notional_usd` / `upnl_usd` | |
+| `sources` 值 `"error: …"` | `sources` 三态 + `sources_detail` | |

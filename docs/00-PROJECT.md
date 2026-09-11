@@ -1,6 +1,6 @@
 # hlens · 项目文档（v3.1）
 
-> 文档集：`00-PROJECT.md`（本文）· `01-FEATURES.md`（功能与显示）· `02-API.md` + `api/openapi.yaml`（前后端契约）· `03-DEVELOPMENT.md`（开发与运维）。旧版在 `docs/archive/`。
+> 文档集：`00-PROJECT.md`（本文）· `01-FEATURES.md`（功能与显示）· `02-API.md` + `api/openapi.yaml`（前后端契约）· `03-DEVELOPMENT.md`（开发与运维）· `04-ARCHITECTURE-REVIEW.md`（仓库级审查与复用清单）· `05-DOCKER.md`（Docker 落地）。旧版在 `docs/archive/`。
 > v3.1（2026-09-11）：吸收五方审核（项目经理、后端、前端、API、散户用户）与 hub 历史数据集的事实后重写。审核记录见 `docs/reviews/2026-09-11-round1.md`。
 
 ## 1. 一句话
@@ -57,17 +57,18 @@ raphael 的 hub 机器（Tailscale 100.79.90.118）持续采集 Hyperliquid，Pa
 |---|---|
 | 东京 | **主库**（数据产生地）：Postgres/Timescale、Redis、采集器（REST + WS）、大户引擎、分析、告警引擎 |
 | 新加坡 | 只读副本、API、Web、待命 API、第二个 cloudflared 连接器、Prometheus/Grafana |
-| hub（笔记本） | 历史数据导入源、离线校准与记分板重算、不承担线上流量 |
+| hub（笔记本） | `hlens-hub` 生产采集与 GitHub `hlens` 档案系统继续以 systemd 运行，**不容器化、不进 CryptoPlus 的 compose**；作为历史数据导入源（只读）与离线校准机 |
 | 法兰克福 / 上海 | 不用 |
 | GitHub Pages | **降级模式**：API 每 30 分钟推 `latest.json`；主站不可用时 Worker 回退到只读快照 |
 
+约束：东京的公网出口 IP 必须与 hub 任一 worker 不同（交易所限速按出口 IP 记账）；hub 上两处安全问题（`hub.env` 明文 secret、admin 端点无鉴权绑 0.0.0.0）由 raphael 在 S0 处理。Docker 落地见 `05-DOCKER.md`，代码复用见 `04-ARCHITECTURE-REVIEW.md`。
 Cloudflare 免费层（DNS、Tunnel 双连接器、缓存规则、WAF、Web Analytics）；R2 备份约 1.5 美元/月；Sentry、Better Stack（心跳与死人开关）、Resend 免费层。**前置任务**：核实两台免费 VPS 的规格与回收政策，写入容量表；免费 VPS 失效应急预算 40 美元/月，数据与配置全部在 R2 可 2 小时重建。
 承诺：RPO ≤ 5 分钟（WAL 归档）、RTO 1 小时（人工提升）；无 SLA。
 
 ## 8. 路线图（20 周，按每周 20–25 小时）
 | 阶段 | 周 | 交付 | 单条可判定验收 |
 |---|---|---|---|
-| S0 地基与法务 | 1–2 | `/terms` `/privacy` `/disclaimer` `/sources`（每所数据再分发条款结论）、18+ 与地域限制、support 邮箱；机器规格与容量表；`venues.yaml` 限速预算；OKX 带单榜可用性 30 分钟验证；hub 数据导入试跑（1 天样本） | 四页法律文本上线；容量表覆盖全部表 |
+| S0 地基与法务 | 1–2 | `/terms` `/privacy` `/disclaimer` `/sources`、18+ 与地域限制、support 邮箱；机器规格与容量表；`venues.yaml` 限速预算；OKX 带单榜验证；hub 安全修复与出口 IP 核对；抽取 `packages/hlens-core` 四个复用包（contracts/qa/catalog/ratelimit）；hub 导入试跑（1 天样本） | 四页法律文本上线；容量表覆盖全部表；hlens-core 测试绿 |
 | S1 采集 | 3–6 | Binance、Bybit、OKX + Hyperliquid；WS 优先（标记价、全市场 tickers、爆仓流）；Timescale 迁移、`instruments`、`source_health`；双机部署、Tunnel 双连接器；备份与一次恢复演练；静态层降级接上 | 连续 14 天各源分钟级绿色 ≥ 95%；磁盘增长在估算 ±20% 内 |
 | S2 单币闭环 | 7–9 | 设计令牌与五屏设计稿评审；币页（六面光谱 + 三周期状态（仅价格类）+ 句子引擎 v1 五个模板 + 分位）+ 首页 + 中英 + 术语气泡 | 5 人任务测试（3 个任务，60 秒内答对）≥ 4/5 |
 | S3 大户 | 10–12 | 导入 hub 历史（fill_history + fill + position + funding + kline）；同一事件引擎跑历史与实时；事件流、五板、钱包页（首行命中率）、WhaleCard 分享；Pro 等待名单 | 大户事件 ≥ 3 个预注册分组 n ≥ 100 |
