@@ -2,7 +2,7 @@
 """
 hlens-CryptoPlus data fetcher.
 
-Pulls public, key-free data from Binance / Bybit / OKX / Hyperliquid and
+Pulls public, key-free data from Binance / Bybit / OKX / Gate / Bitget / Hyperliquid and
 writes data/latest.json (full snapshot) + data/history.json (compact trend).
 
 Stdlib only. Designed to run inside GitHub Actions every 30 minutes.
@@ -24,6 +24,10 @@ DATA = ROOT / "data"
 DATA.mkdir(exist_ok=True)
 
 COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB", "SUI"]
+
+# www.binance.com mirrors the futures API and is reachable from US IPs (GitHub runners),
+# where fapi.binance.com answers 451. Try the mirror first, then the canonical host.
+BINANCE_BASES = ["https://www.binance.com", "https://fapi.binance.com"]
 
 HL_INFO = "https://api.hyperliquid.xyz/info"
 HL_LEADERBOARD = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
@@ -72,14 +76,23 @@ def log(*a):
 # ---------------------------------------------------------------- exchanges
 def binance(coin: str) -> dict | None:
     s = f"{coin}USDT"
-    base = "https://fapi.binance.com"
+
+    def bget(path):
+        last = None
+        for base in BINANCE_BASES:
+            try:
+                return http(base + path, retries=1)
+            except RuntimeError as e:
+                last = e
+        raise RuntimeError(str(last))
+
     try:
-        px = http(f"{base}/fapi/v1/premiumIndex?symbol={s}")
-        oi = http(f"{base}/fapi/v1/openInterest?symbol={s}")
-        tk = http(f"{base}/fapi/v1/ticker/24hr?symbol={s}")
-        gl = http(f"{base}/futures/data/globalLongShortAccountRatio?symbol={s}&period=1h&limit=1")
-        tp = http(f"{base}/futures/data/topLongShortPositionRatio?symbol={s}&period=1h&limit=1")
-        tk_ls = http(f"{base}/futures/data/takerlongshortRatio?symbol={s}&period=1h&limit=1")
+        px = bget(f"/fapi/v1/premiumIndex?symbol={s}")
+        oi = bget(f"/fapi/v1/openInterest?symbol={s}")
+        tk = bget(f"/fapi/v1/ticker/24hr?symbol={s}")
+        gl = bget(f"/futures/data/globalLongShortAccountRatio?symbol={s}&period=1h&limit=1")
+        tp = bget(f"/futures/data/topLongShortPositionRatio?symbol={s}&period=1h&limit=1")
+        tk_ls = bget(f"/futures/data/takerlongshortRatio?symbol={s}&period=1h&limit=1")
     except RuntimeError as e:
         log("binance", coin, e)
         return None
@@ -165,6 +178,79 @@ def okx(coin: str) -> dict | None:
         "vol24h_usd": (f(tkd.get("volCcy24h"), 0.0) or 0.0) * (last or 0.0),
         "chg24h_pct": ((last / open24) - 1) * 100 if last and open24 else None,
         "retail_long_share": ls_ratio / (1 + ls_ratio) if ls_ratio else None,
+        "top_trader_long_share": None,
+        "taker_buy_share": buy / (buy + sell) if (buy + sell) > 0 else None,
+    }
+
+
+def gate(coin: str) -> dict | None:
+    c = f"{coin}_USDT"
+    base = "https://api.gateio.ws/api/v4/futures/usdt"
+    try:
+        st = http(f"{base}/contract_stats?contract={c}&interval=1h&limit=1")
+        tk = http(f"{base}/tickers?contract={c}")
+        ct = http(f"{base}/contracts/{c}")
+    except RuntimeError as e:
+        log("gate", coin, e)
+        return None
+    if not st or not tk:
+        return None
+    st, tk = st[-1], tk[0]
+    lsr_a = f(st.get("lsr_account"))
+    top = f(st.get("top_lsr_size"))
+    lt, stk = f(st.get("long_taker_size"), 0.0), f(st.get("short_taker_size"), 0.0)
+    interval_h = int((f(ct.get("funding_interval"), 28800) or 28800) / 3600)
+    return {
+        "exchange": "gate",
+        "price": f(tk.get("mark_price")),
+        "funding": f(tk.get("funding_rate")),
+        "funding_interval_h": interval_h or 8,
+        "next_funding_ms": int(f(ct.get("funding_next_apply"), 0) or 0) * 1000 or None,
+        "oi_usd": f(st.get("open_interest_usd")),
+        "vol24h_usd": f(tk.get("volume_24h_quote")),
+        "chg24h_pct": f(tk.get("change_percentage")),
+        "retail_long_share": lsr_a / (1 + lsr_a) if lsr_a else None,
+        "top_trader_long_share": top / (1 + top) if top else None,
+        "taker_buy_share": lt / (lt + stk) if (lt + stk) > 0 else None,
+        "liq_long_usd_1h": f(st.get("long_liq_usd"), 0.0),
+        "liq_short_usd_1h": f(st.get("short_liq_usd"), 0.0),
+    }
+
+
+def bitget(coin: str) -> dict | None:
+    s = f"{coin}USDT"
+    base = "https://api.bitget.com/api/v2/mix/market"
+    try:
+        tk = http(f"{base}/ticker?symbol={s}&productType=USDT-FUTURES")
+    except RuntimeError as e:
+        log("bitget", coin, e)
+        return None
+    ar, tv = {}, {}
+    try:
+        ar = http(f"{base}/account-long-short?symbol={s}&period=1h", retries=1)
+    except RuntimeError:
+        pass  # not every symbol has ratio stats
+    try:
+        tv = http(f"{base}/taker-buy-sell?symbol={s}&period=1h", retries=1)
+    except RuntimeError:
+        pass
+    d = (tk.get("data") or [{}])[0]
+    if not d:
+        return None
+    mark = f(d.get("markPrice"))
+    a = (ar.get("data") or [{}])[-1]
+    t = (tv.get("data") or [{}])[-1]
+    buy, sell = f(t.get("buyVolume"), 0.0), f(t.get("sellVolume"), 0.0)
+    return {
+        "exchange": "bitget",
+        "price": mark,
+        "funding": f(d.get("fundingRate")),
+        "funding_interval_h": 8,
+        "next_funding_ms": None,
+        "oi_usd": (f(d.get("holdingAmount"), 0.0) or 0.0) * (mark or 0.0),
+        "vol24h_usd": f(d.get("usdtVolume")),
+        "chg24h_pct": (f(d.get("change24h"), 0.0) or 0.0) * 100,
+        "retail_long_share": f(a.get("longAccountRatio")),
         "top_trader_long_share": None,
         "taker_buy_share": buy / (buy + sell) if (buy + sell) > 0 else None,
     }
@@ -404,9 +490,13 @@ def main():
         bn = list(pool.map(binance, COINS))
         bb = list(pool.map(bybit, COINS))
         ok = list(pool.map(okx, COINS))
+        gt = list(pool.map(gate, COINS))
+        bg = list(pool.map(bitget, COINS))
     status["binance"] = "ok" if any(bn) else "error"
-    status["bybit"] = "ok" if any(bb) else "error"
+    status["bybit"] = "ok" if any(bb) else "error (geo-blocked from US runners)"
     status["okx"] = "ok" if any(ok) else "error"
+    status["gate"] = "ok" if any(gt) else "error"
+    status["bitget"] = "ok" if any(bg) else "error"
 
     macro = fetch_macro(); status["fear_greed"] = "ok" if macro.get("fng") else "error"
 
@@ -418,7 +508,7 @@ def main():
         status["hl_leaderboard"] = f"error: {e}"
     whale_by_coin = {c["coin"]: c for c in whales["by_coin"]}
 
-    coins = [build_coin(c, [bn[i], bb[i], ok[i], hl.get(c)], whale_by_coin) for i, c in enumerate(COINS)]
+    coins = [build_coin(c, [bn[i], bb[i], ok[i], gt[i], bg[i], hl.get(c)], whale_by_coin) for i, c in enumerate(COINS)]
 
     ts = now_ms()
     latest = {

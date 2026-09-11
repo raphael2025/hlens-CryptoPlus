@@ -30,7 +30,7 @@
 
 | # | 差异点 | Coinglass | hlens | 数据来源（已验证 HTTP 200） |
 |---|---|---|---|---|
-| 1 | **一币棱镜**：散户 / 大账户 / 主动买卖 / 大户 / 费率 / OI 六行并排，中心对齐条形 | 分散在不同页面 | 首屏核心 | Binance、Bybit、OKX、Hyperliquid |
+| 1 | **一币棱镜**：散户 / 大账户 / 主动买卖 / 大户 / 费率 / OI 六行并排，中心对齐条形 | 分散在不同页面 | 首屏核心 | Binance（镜像域名）、OKX、Gate、Bitget、Bybit（可用则用）、Hyperliquid |
 | 2 | **散户 vs 大户分歧**作为首页头条 | 无 | 洞察条第一张卡 | 同上 |
 | 3 | **大户事件带 + 公开计分板**：追踪钱包的开仓 / 平仓 / 翻转事件，记录 1h / 4h / 24h 后价格走向，滚动展示"大户开仓后价格顺向 / 逆向"的命中率 | 只有实时预警，不回看 | v0.3 | Hyperliquid `userFills`（每 30 分钟拉 60 个钱包，成本极低） |
 | 4 | **证据标签**：每一句解读旁边有标签：`已验证`（附数据规模、检验方法、时间范围）/ `启发式` / `观点` | 无 | 全站 | 本地研究文档 + 站内自验证 |
@@ -51,7 +51,7 @@ GitHub Actions (cron */30)                         浏览器
 ┌──────────────────────────────┐                  ┌──────────────────────────┐
 │ 1. curl 线上 data/history.json│                  │ index.html (静态)        │
 │ 2. python scripts/fetch.py    │  upload-pages    │  ├ fetch data/latest.json│
-│    ├ Binance / Bybit / OKX    │ ───────────────▶ │  ├ fetch data/history.json│
+│    ├ Binance(镜像)/OKX/Gate/Bitget/Bybit │ ───────────────▶ │  ├ fetch data/history.json│
 │    ├ Hyperliquid ctx+leaderboard│  deploy-pages  │  └ 纯前端渲染，i18n      │
 │    ├ alternative.me F&G        │                  └──────────────────────────┘
 │    └ 写 data/*.json            │
@@ -65,15 +65,17 @@ GitHub Actions (cron */30)                         浏览器
                                       └──────────────────────────────────┘
 ```
 
-**已知风险与对策**
+**已知风险与对策（2026-09-11 已在 Actions 内实测）**
 
-| 风险 | 事实 | 对策 |
+| 风险 | 实测事实 | 对策（已实施 / 计划） |
 |---|---|---|
-| Binance 合约接口对美国 IP 返回 451，GitHub 托管 runner 在美国 | 本机（非美 IP）全 200；Actions 内未验证 | 脚本已按交易所降级（Binance 失败则三所继续）。首个 Actions 运行后看 `sources.binance`。若 451：方案 A 用 Cloudflare Worker 反代；方案 B 在用户现有服务器上跑 self-hosted runner。 |
-| Hyperliquid 排行榜 JSON 约 37 MB | 每 30 分钟拉一次，解析 5 秒 | 可接受。v0.3 改为只在整点拉全量，其余时间复用候选名单。 |
-| 单次抓取 3 分钟（143 个钱包串行） | Actions 免费额度每月 2000 分钟，30 分钟一次 = 每月约 1440 次 × 3.5 分钟 ≈ 5000 分钟 | **超额**。对策：公开仓库 Actions 不计费（公开仓库免费无限额），本仓库必须 public；另把钱包查询改为 4 线程并发，压到 1 分钟以内。 |
-| 排行榜的账户价值是快照，与实时不一致 | 已观察到 6000 万 vs 8669 美元的差异 | 以 `clearinghouseState` 实时值为准，排行榜只用于候选。 |
-| 公开接口变更 | 不可控 | 每个源独立 try，`sources` 字段暴露状态，前端显示红绿灯。 |
+| Binance 合约接口对美国 IP 返回 451 | `fapi.binance.com` 从 GitHub runner 得到 451；`www.binance.com/fapi/*` 与 `www.binance.com/futures/data/*` 同样路径全部 200 且返回真实数据 | **已实施**：脚本优先走 `www.binance.com` 镜像，失败再回退 `fapi`。 |
+| Bybit 对美国 IP 返回 403 | `api.bybit.com`、`api.bytick.com`、`.nl`、`.kz`、`-tr`、`bybitglobal` 全部 403；Cloudflare Worker 反代的出口位置跟随调用方所在 colo，从美国调用大概率同样 403 | **已实施**：Bybit 保留为"可用则用"，失败时 `sources.bybit` 显示灰色说明；**新增 Gate 与 Bitget** 补足（两者从美国 200）。若日后用自有服务器做 self-hosted runner，Bybit 自动恢复。 |
+| Gate / Bitget / OKX / Deribit / Hyperliquid 从美国可达 | 全部 200 | 作为主数据源。Gate `contract_stats` 一次给出账户多空比、大账户多空比、主动买卖比、美元 OI 与真实爆仓金额，性价比最高。 |
+| Hyperliquid 排行榜 JSON 约 37 MB | 每 30 分钟拉一次，下载 + 解析约 5 秒 | 可接受。v0.3 改为整点全量、其余复用候选名单。 |
+| Actions 用量 | 并发后单次约 40 到 70 秒；公开仓库的托管 runner 不计费 | 仓库保持 public。 |
+| 排行榜账户价值是快照 | 已观察到 6000 万 vs 8669 美元的差异 | 以 `clearinghouseState` 实时值为准，排行榜只用于候选。 |
+| 公开接口变更 | 不可控 | 每个源独立 try，`sources` 字段暴露状态，前端显示红绿灯；`.github/workflows/diag.yml` 可手动触发探测各域名。 |
 
 ---
 
@@ -268,8 +270,8 @@ v0.2 加"入群你会得到什么"三条：每日一张棱镜截图与一句话�
 `funding_8h = funding_raw × (8 / interval_h)`。跨所平均按 OI 加权。年化 = `funding_8h × 1095`。
 
 ### 5.2 三种持仓
-- 散户多头占比：Binance `globalLongShortAccountRatio.longAccount`、Bybit `account-ratio.buyRatio`、OKX `long-short-account-ratio` 折算 `r/(1+r)`，三者算术平均。局限：按账户数不按金额。
-- 大账户多头占比：Binance `topLongShortPositionRatio.longAccount`（前 20% 账户按持仓金额）。
+- 散户多头占比：Binance `globalLongShortAccountRatio.longAccount`、OKX `long-short-account-ratio` 折算 `r/(1+r)`、Gate `contract_stats.lsr_account` 折算、Bitget `account-long-short.longAccountRatio`、Bybit `account-ratio.buyRatio`（可用时），算术平均。局限：按账户数不按金额。
+- 大账户多头占比：Binance `topLongShortPositionRatio.longAccount`（前 20% 账户按持仓金额）与 Gate `contract_stats.top_lsr_size` 折算，二者平均。
 - 大户多头占比：追踪的 HL 钱包在该币上的 `long_notional / (long + short)`。样本数显示在旁。
 
 ### 5.3 拥挤度

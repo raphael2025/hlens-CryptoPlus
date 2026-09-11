@@ -38,7 +38,7 @@ Schema is documented in [docs/SPEC.md](docs/SPEC.md) and will be versioned once 
 
 ## Sources
 
-Binance USDⓈ-M futures, Bybit linear, OKX swap, Hyperliquid info API + public leaderboard, alternative.me Fear & Greed. All key-free public endpoints.
+Binance USDⓈ-M futures (through the `www.binance.com` mirror, which is reachable from US-based GitHub runners where `fapi.binance.com` answers 451), OKX swap, Gate and Bitget USDT futures, Bybit linear (geo-blocked from US runners, used when reachable), Hyperliquid info API + public leaderboard, alternative.me Fear & Greed. All key-free public endpoints.
 
 ## Disclaimer
 
