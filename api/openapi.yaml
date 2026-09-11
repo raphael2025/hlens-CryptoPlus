@@ -1,386 +1,816 @@
 openapi: 3.1.0
 info:
   title: hlens API
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    The perp positioning prism. Public read endpoints need no auth. Field conventions:
-    snake_case; `ts` = unix ms; `*_usd` = float USD; `*_share` = 0..1; funding rates as decimals (0.0001 = 0.01%).
-    Every aggregate carries `as_of` and `sources`; missing data is `null`, never 0.
+    The perp positioning prism. Public GET endpoints need no auth.
+    Conventions: snake_case; `ts` = unix ms; `*_usd` = USD; `*_share` = 0..1; `*_pct` = percent;
+    funding rates as decimals (0.0001 = 0.01%). Missing data is null (typed as [T, "null"]), never 0.
+    Every aggregate carries `as_of` and `sources`. Lists use the envelope {as_of, sources, items, next_cursor}.
 servers:
   - url: https://api.hlens.xyz/v1
-tags: [market, funding, liquidations, whales, events, options, system, me]
+security: []
+tags:
+  - { name: market, description: "Prism, context, levels, history, insights" }
+  - { name: funding, description: "Funding, open interest, long/short ratios" }
+  - { name: liquidations, description: "Real liquidations and model heatmap" }
+  - { name: whales, description: "Tracked wallets, positions, events, boards" }
+  - { name: events, description: "Market events, scorecard, calendar, evidence" }
+  - { name: macro, description: "Macro context; options and basis are v1.1" }
+  - { name: system, description: "Status and share images" }
+  - { name: me, description: "Authenticated user resources" }
+x-hlens-ws:
+  url: /v1/stream
+  subscribe: "#/components/schemas/StreamSubscribe"
+  message: "#/components/schemas/StreamMessage"
+  channels:
+    - { pattern: "prism:{symbol}", payload: "#/components/schemas/PrismPatch", cadence_s: 10 }
+    - { pattern: "state:{symbol}", payload: "#/components/schemas/MarketState", cadence_s: 0 }
+    - { pattern: "liq:*|liq:{symbol}", payload: "#/components/schemas/LiqBatch", cadence_s: 0.25 }
+    - { pattern: "whale:events|whale:{address}", payload: "#/components/schemas/WhaleEvent", cadence_s: 0 }
+    - { pattern: "events:*", payload: "#/components/schemas/Event", cadence_s: 0 }
 
 paths:
   /coins:
     get:
+      operationId: listCoins
+      x-hlens-mcp: listCoins
       tags: [market]
-      summary: List coins with prism summary (screener)
+      summary: Coins with prism summary (screener / batch lookup)
       x-hlens-cache: 60
       parameters:
-        - { name: preset, in: query, schema: { type: string, enum: [crowded_short, crowded_long, retail_vs_whale, oi_surge, paid_to_hold, whale_flip, healthy_pullback, squeeze] } }
-        - { name: sort, in: query, schema: { type: string, example: "-crowding" } }
-        - { name: cols, in: query, schema: { type: string, description: comma list of extra columns } }
-        - { name: limit, in: query, schema: { type: integer, maximum: 500, default: 100 } }
-        - { name: cursor, in: query, schema: { type: string } }
+        - { name: symbols, in: query, description: comma list; batch lookup for position bar, style: form, explode: false, schema: { type: array, items: { $ref: "#/components/schemas/Symbol" }, maxItems: 50 } }
+        - { name: fields, in: query, description: extra columns, style: form, explode: false, schema: { type: array, items: { type: string, enum: [funding_spread, oi_chg24h_pct, taker_buy_share, oi_pctl_30d, liq_24h_long_usd, liq_24h_short_usd, vol24h_usd] } } }
+        - { name: preset, in: query, schema: { $ref: "#/components/schemas/Preset" } }
+        - { name: sort, in: query, schema: { type: string, enum: [crowding, -crowding, funding_apr_pct, -funding_apr_pct, oi_total_usd, -oi_total_usd, oi_chg24h_pct, -oi_chg24h_pct, gap_pts, -gap_pts, chg24h_pct, -chg24h_pct], default: -oi_total_usd } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200":
-          content: { application/json: { schema: { $ref: "#/components/schemas/CoinList" } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/CoinList" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/prism:
     get:
+      operationId: getPrism
+      x-hlens-mcp: getPrism
       tags: [market]
       summary: Full prism for one coin
       x-hlens-cache: 10
-      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      parameters: [ { $ref: "#/components/parameters/SymbolPath" } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Prism" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Prism" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
+  /coins/{symbol}/explain:
+    get:
+      operationId: explainCoin
+      x-hlens-mcp: explainCoin
+      tags: [market]
+      summary: Bilingual explanation of the prism with evidence tags and the inputs used
+      x-hlens-cache: 60
+      parameters: [ { $ref: "#/components/parameters/SymbolPath" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Explanation" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/context:
     get:
+      operationId: getContext
+      x-hlens-mcp: getContext
       tags: [market]
       summary: Market context (state, key levels, last 24h, drivers, calendar)
       x-hlens-cache: 60
-      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      parameters: [ { $ref: "#/components/parameters/SymbolPath" } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Context" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Context" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/levels:
     get:
+      operationId: getLevels
+      x-hlens-mcp: getLevels
       tags: [market]
-      summary: Price ladder — liquidation clusters, whale liquidation prices, real 24h liquidations
+      summary: Price ladder — real liquidations and whale liquidation prices first, model clusters second
       x-hlens-cache: 60
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
-        - { name: range_pct, in: query, schema: { type: number, default: 15 } }
-        - { name: lev_weights, in: query, schema: { type: string, description: "e.g. 10:0.4,25:0.3,50:0.2,100:0.1" } }
+        - { $ref: "#/components/parameters/SymbolPath" }
+        - { name: range_pct, in: query, schema: { type: number, minimum: 1, maximum: 50, default: 15 } }
+        - { name: lev_weights, in: query, description: "e.g. 10:0.4,25:0.3,50:0.2,100:0.1", schema: { type: string, pattern: "^(\\d+:\\d*\\.?\\d+)(,\\d+:\\d*\\.?\\d+)*$" } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Levels" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Levels" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/history:
     get:
+      operationId: getHistory
+      x-hlens-mcp: getHistory
       tags: [market]
-      summary: Time series of prism fields
+      summary: Time series of prism fields (aggregate, or one venue)
       x-hlens-cache: 60
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
-        - { name: fields, in: query, required: true, schema: { type: string, example: "price,crowding,funding_8h,oi_total_usd" } }
+        - { $ref: "#/components/parameters/SymbolPath" }
+        - { name: fields, in: query, required: true, style: form, explode: false, schema: { type: array, minItems: 1, items: { $ref: "#/components/schemas/HistoryField" } } }
+        - { name: venue, in: query, description: omit for aggregate, schema: { $ref: "#/components/schemas/Venue" } }
         - { name: interval, in: query, schema: { type: string, enum: [1m, 5m, 15m, 1h, 4h, 1d], default: 1h } }
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/state-history:
     get:
+      operationId: getStateHistory
+      x-hlens-mcp: getStateHistory
       tags: [market]
       summary: Hourly state labels for the state strip
       x-hlens-cache: 300
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
-        - { name: days, in: query, schema: { type: integer, default: 30, maximum: 365 } }
+        - { $ref: "#/components/parameters/SymbolPath" }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/StateHistory" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/StateHistory" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /coins/{symbol}/snapshot:
     get:
+      operationId: getSnapshot
+      x-hlens-mcp: getSnapshot
       tags: [market]
-      summary: Prism + sentence as it was at a past time (replay)
+      summary: Prism and sentence as they were at a past time (replay)
       x-hlens-cache: 3600
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
-        - { name: at, in: query, required: true, schema: { type: integer, description: unix ms } }
+        - { $ref: "#/components/parameters/SymbolPath" }
+        - { name: at, in: query, required: true, schema: { $ref: "#/components/schemas/Ts" } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Snapshot" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /market/breadth:
     get:
+      operationId: getBreadth
+      x-hlens-mcp: getBreadth
       tags: [market]
       summary: Market breadth over top 100 coins
       x-hlens-cache: 300
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Breadth" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Breadth" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /insights:
     get:
+      operationId: getInsights
+      x-hlens-mcp: getInsights
       tags: [market]
-      summary: Home page sentence and question cards
+      summary: Home page — abnormal three, market sentence, question cards
       x-hlens-cache: 60
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Insights" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Insights" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
   /funding:
     get:
+      operationId: listFunding
+      x-hlens-mcp: listFunding
       tags: [funding]
-      summary: Funding matrix, all coins × venues
+      summary: Funding matrix, all coins x venues
       x-hlens-cache: 60
       parameters:
-        - { name: sort, in: query, schema: { type: string, default: "-abs_apr" } }
+        - { name: sort, in: query, schema: { type: string, enum: [funding_apr_pct_abs, -funding_apr_pct_abs, funding_spread, -funding_spread, oi_total_usd, -oi_total_usd], default: -funding_apr_pct_abs } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/FundingRow" } } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/FundingList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /funding/{symbol}/history:
     get:
+      operationId: getFundingHistory
+      x-hlens-mcp: getFundingHistory
       tags: [funding]
+      summary: Funding history per venue and cumulative cost
+      x-hlens-cache: 300
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
-        - { name: days, in: query, schema: { type: integer, default: 30 } }
+        - { $ref: "#/components/parameters/SymbolPath" }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/FundingHistory" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/FundingHistory" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /funding/arb:
     get:
+      operationId: listFundingArb
+      x-hlens-mcp: listFundingArb
       tags: [funding]
       summary: Cross-venue funding spreads with fee-adjusted APR (heuristic)
+      x-hlens-cache: 60
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ArbRow" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ArbList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /oi/{symbol}/history:
     get:
+      operationId: getOiHistory
+      x-hlens-mcp: getOiHistory
       tags: [funding]
+      summary: Open interest history per venue
+      x-hlens-cache: 300
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
+        - { $ref: "#/components/parameters/SymbolPath" }
         - { name: interval, in: query, schema: { type: string, enum: [5m, 1h, 1d], default: 1h } }
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Series" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /ls/{symbol}:
     get:
+      operationId: listLsRatios
+      x-hlens-mcp: listLsRatios
       tags: [funding]
-      summary: Long/short ratios by venue and kind
-      parameters: [ { $ref: "#/components/parameters/Symbol" } ]
+      summary: Current long/short ratios by venue and kind
+      x-hlens-cache: 300
+      parameters: [ { $ref: "#/components/parameters/SymbolPath" } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/LSRatio" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/LsRatioList" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
   /liquidations/recent:
     get:
+      operationId: listLiquidations
+      x-hlens-mcp: listLiquidations
       tags: [liquidations]
+      summary: Recent real liquidations (a lower bound — exchanges throttle their feeds)
+      x-hlens-cache: 10
       parameters:
-        - { name: symbol, in: query, schema: { type: string } }
-        - { name: min_usd, in: query, schema: { type: number, default: 0 } }
-        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 500 } }
+        - { $ref: "#/components/parameters/SymbolQuery" }
+        - { name: min_usd, in: query, schema: { type: number, minimum: 0, default: 0 } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Liquidation" } } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/LiquidationList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /liquidations/agg:
     get:
+      operationId: getLiqAgg
+      x-hlens-mcp: getLiqAgg
       tags: [liquidations]
+      summary: Aggregated liquidations by symbol / venue / side
+      x-hlens-cache: 60
       parameters:
         - { name: window, in: query, schema: { type: string, enum: [1h, 4h, 24h], default: 24h } }
         - { name: group_by, in: query, schema: { type: string, enum: [symbol, venue, side], default: symbol } }
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/LiqAggRow" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/LiqAggList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /liquidations/heatmap/{symbol}:
     get:
+      operationId: getLiqHeatmap
+      x-hlens-mcp: getLiqHeatmap
       tags: [liquidations]
-      summary: Model-estimated liquidation density grid (labelled model, not real)
+      summary: Model-estimated liquidation density grid (labelled model_estimated)
+      x-hlens-cache: 300
       parameters:
-        - { $ref: "#/components/parameters/Symbol" }
+        - { $ref: "#/components/parameters/SymbolPath" }
         - { name: days, in: query, schema: { type: integer, enum: [7, 30], default: 7 } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Heatmap" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Heatmap" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /liquidations/cascades:
     get:
+      operationId: listCascades
+      x-hlens-mcp: listCascades
       tags: [liquidations]
-      parameters: [ { $ref: "#/components/parameters/From" }, { $ref: "#/components/parameters/To" } ]
+      summary: Detected liquidation cascades (relative threshold)
+      x-hlens-cache: 60
+      parameters: [ { $ref: "#/components/parameters/From" }, { $ref: "#/components/parameters/To" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Cascade" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/CascadeList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
   /whales:
     get:
+      operationId: listWallets
+      x-hlens-mcp: listWallets
       tags: [whales]
       summary: Tracked wallets
+      x-hlens-cache: 60
       parameters:
-        - { name: sort, in: query, schema: { type: string, enum: [account_value, pnl_30d, roi_30d, hit_rate], default: account_value } }
+        - { name: sort, in: query, schema: { type: string, enum: [account_value_usd, -account_value_usd, pnl_30d_usd, -pnl_30d_usd, roi_30d, -roi_30d, hit_rate_24h, -hit_rate_24h], default: -account_value_usd } }
         - { name: source, in: query, schema: { type: string, enum: [hyperliquid, okx, all], default: all } }
-        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
-        - { name: cursor, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WalletList" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/WalletList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/{address}:
     get:
+      operationId: getWallet
+      x-hlens-mcp: getWallet
       tags: [whales]
-      parameters: [ { $ref: "#/components/parameters/Address" } ]
+      summary: Wallet detail with positions, equity curve and recent events
+      x-hlens-cache: 60
+      parameters: [ { $ref: "#/components/parameters/AddressPath" } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WalletDetail" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WalletDetail" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/{address}/fills:
     get:
+      operationId: listWalletFills
+      x-hlens-mcp: listWalletFills
       tags: [whales]
-      parameters:
-        - { $ref: "#/components/parameters/Address" }
-        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
-        - { name: cursor, in: query, schema: { type: string } }
+      summary: Wallet fills, newest first
+      x-hlens-cache: 60
+      parameters: [ { $ref: "#/components/parameters/AddressPath" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/FillList" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/FillList" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/positions:
     get:
+      operationId: listWhalePositions
+      x-hlens-mcp: listWhalePositions
       tags: [whales]
       summary: Largest open positions across tracked wallets
+      x-hlens-cache: 30
       parameters:
-        - { name: symbol, in: query, schema: { type: string } }
-        - { name: sort, in: query, schema: { type: string, enum: [notional, liq_distance_pct, upnl], default: notional } }
-        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { $ref: "#/components/parameters/SymbolQuery" }
+        - { name: sort, in: query, schema: { type: string, enum: [notional_usd, -notional_usd, liq_distance_pct, -liq_distance_pct, upnl_usd, -upnl_usd], default: -notional_usd } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WhalePositionList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/events:
     get:
+      operationId: listWhaleEvents
+      x-hlens-mcp: listWhaleEvents
       tags: [whales]
+      summary: Whale events (open / add / reduce / close / flip / near_liq / liquidated)
+      x-hlens-cache: 10
       parameters:
-        - { name: symbol, in: query, schema: { type: string } }
-        - { name: types, in: query, schema: { type: string, description: "comma list of WhaleEventType" } }
-        - { name: min_usd, in: query, schema: { type: number, default: 0 } }
-        - { name: address, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/SymbolQuery" }
+        - { name: types, in: query, style: form, explode: false, schema: { type: array, items: { $ref: "#/components/schemas/WhaleEventType" } } }
+        - { name: min_usd, in: query, schema: { type: number, minimum: 0, default: 0 } }
+        - { name: address, in: query, schema: { $ref: "#/components/schemas/Address" } }
         - { $ref: "#/components/parameters/From" }
-        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
-        - { name: cursor, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WhaleEventList" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/WhaleEventList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/by-coin:
     get:
+      operationId: listWhaleByCoin
+      x-hlens-mcp: listWhaleByCoin
       tags: [whales]
+      summary: Whale long/short notional per coin
+      x-hlens-cache: 60
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WhaleCoinAgg" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WhaleCoinAggList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /whales/boards:
     get:
+      operationId: getWhaleBoards
+      x-hlens-mcp: getWhaleBoards
       tags: [whales]
-      summary: Bets / rekt-soon / capitulation / winners-losers boards in one call
+      summary: Bets / rekt-soon / closed-loss / winners-losers boards in one call
       x-hlens-cache: 30
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/WhaleBoards" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WhaleBoards" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
   /events:
     get:
+      operationId: listEvents
+      x-hlens-mcp: listEvents
       tags: [events]
       summary: Market event timeline ("what did I miss")
+      x-hlens-cache: 60
       parameters:
-        - { name: since, in: query, required: true, schema: { type: integer } }
-        - { name: until, in: query, schema: { type: integer } }
-        - { name: types, in: query, schema: { type: string, description: "price,liq,funding,whale,crowd,state" } }
-        - { name: symbol, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 500 } }
+        - { name: since, in: query, required: true, schema: { $ref: "#/components/schemas/Ts" } }
+        - { name: until, in: query, schema: { $ref: "#/components/schemas/Ts" } }
+        - { name: types, in: query, style: form, explode: false, schema: { type: array, items: { $ref: "#/components/schemas/EventType" } } }
+        - { $ref: "#/components/parameters/SymbolQuery" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        "200": { description: OK, headers: { ETag: { $ref: "#/components/headers/ETag" }, X-RateLimit-Limit: { $ref: "#/components/headers/X-RateLimit-Limit" }, X-RateLimit-Remaining: { $ref: "#/components/headers/X-RateLimit-Remaining" }, X-RateLimit-Reset: { $ref: "#/components/headers/X-RateLimit-Reset" } }, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /scorecard:
     get:
+      operationId: getScorecard
+      x-hlens-mcp: getScorecard
       tags: [events]
-      summary: Forward-return statistics for states, whale events and OI quadrants
+      summary: Forward-return distributions for pre-registered groups (states, whale events, OI quadrants)
       x-hlens-cache: 3600
       parameters:
         - { name: window, in: query, schema: { type: string, enum: [30d, 90d, 365d], default: 90d } }
+        - { name: group_prefix, in: query, schema: { type: string, enum: [state, whale, oiq, crowd] } }
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Scorecard" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Scorecard" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
   /calendar:
     get:
+      operationId: listCalendar
+      x-hlens-mcp: listCalendar
       tags: [events]
-      parameters: [ { name: days, in: query, schema: { type: integer, default: 7 } } ]
+      summary: Upcoming funding settlements, expiries, macro dates, listings
+      x-hlens-cache: 3600
+      parameters: [ { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 30, default: 7 } } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/CalendarList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
+  /evidence:
+    get:
+      operationId: listEvidence
+      x-hlens-mcp: listEvidence
+      tags: [events]
+      summary: Evidence library backing every `verified` tag
+      x-hlens-cache: 3600
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/EvidenceList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
+  /changelog:
+    get:
+      operationId: listChangelog
+      tags: [events]
+      summary: Rule, template and schema changes
+      x-hlens-cache: 3600
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ChangelogList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
-  /options/{currency}/summary:
-    get:
-      tags: [options]
-      parameters: [ { name: currency, in: path, required: true, schema: { type: string, enum: [BTC, ETH] } } ]
-      responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/OptionsSummary" } } } }
-  /basis:
-    get:
-      tags: [options]
-      responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/BasisRow" } } } } }
   /macro:
     get:
-      tags: [options]
+      operationId: getMacro
+      x-hlens-mcp: getMacro
+      tags: [macro]
+      summary: Fear & Greed, stablecoin supply, ETF flows, dominance
+      x-hlens-cache: 3600
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Macro" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Macro" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
+  /options/{currency}/summary:
+    get:
+      operationId: getOptionsSummary
+      tags: [macro]
+      summary: Deribit options summary (v1.1 — returns 501 until implemented)
+      x-hlens-stage: v1.1
+      x-hlens-cache: 300
+      parameters: [ { $ref: "#/components/parameters/Currency" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/OptionsSummary" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "501": { description: Not implemented in this stage, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /basis:
+    get:
+      operationId: listBasis
+      tags: [macro]
+      summary: Annualised basis term structure (v1.1 — returns 501 until implemented)
+      x-hlens-stage: v1.1
+      x-hlens-cache: 300
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/BasisList" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "501": { description: Not implemented in this stage, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /status:
     get:
+      operationId: getStatus
+      x-hlens-mcp: getStatus
       tags: [system]
+      summary: Source health, coverage and 30-day uptime
+      x-hlens-cache: 30
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Status" } } } }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
+  /og/{template}:
+    get:
+      operationId: getOgImage
+      tags: [system]
+      summary: Share card PNG (1200x630)
+      x-hlens-cache: 300
+      parameters:
+        - { name: template, in: path, required: true, schema: { type: string, enum: [whale, coin, market] } }
+        - { $ref: "#/components/parameters/SymbolQuery" }
+        - { name: event_id, in: query, schema: { type: string } }
+        - { name: locale, in: query, schema: { $ref: "#/components/schemas/Locale" } }
+      responses:
+        "200": { description: PNG image, headers: { Cache-Control: { schema: { type: string }, description: "public, max-age=300, immutable when event_id given" } }, content: { image/png: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "500": { $ref: "#/components/responses/ServerError" }
 
   /me:
     get:
+      operationId: getMe
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Current user
+      security: [ { session: [] }, { apiKey: [] } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      operationId: updateMe
+      tags: [me]
+      summary: Update language, timezone, digest preference
+      security: [ { session: [] }, { apiKey: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MeUpdate" } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /me/positions:
     get:
+      operationId: listMyPositions
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Synced positions
+      security: [ { session: [] }, { apiKey: [] } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MyPosition" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MyPositionList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
+      operationId: createMyPosition
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Create (idempotent on client_id)
+      security: [ { session: [] }, { apiKey: [] } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MyPositionInput" } } } }
       responses:
-        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/MyPosition" } } } }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/MyPosition" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /me/positions/{id}:
-    delete:
+    patch:
+      operationId: updateMyPosition
       tags: [me]
-      security: [ { bearer: [] } ]
-      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "204": { description: deleted } }
+      summary: Update a position (last-writer-wins on updated_ts)
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MyPositionInput" } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MyPosition" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: Newer version exists; body carries it, content: { application/json: { schema: { $ref: "#/components/schemas/MyPosition" } } } }
+    delete:
+      operationId: deleteMyPosition
+      tags: [me]
+      summary: Delete a position
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/watchlist:
     get:
+      operationId: getWatchlist
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Watched coins and wallets
+      security: [ { session: [] }, { apiKey: [] } ]
       responses:
-        "200": { content: { application/json: { schema: { $ref: "#/components/schemas/Watchlist" } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Watchlist" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
+      operationId: addWatchItem
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Add a coin or wallet
+      security: [ { session: [] }, { apiKey: [] } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WatchItem" } } } }
-      responses: { "201": { description: added } }
+      responses:
+        "201": { description: Added, content: { application/json: { schema: { $ref: "#/components/schemas/Watchlist" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      operationId: removeWatchItem
+      tags: [me]
+      summary: Remove a coin or wallet
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters:
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [coin, wallet] } }
+        - { name: key, in: query, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/alerts:
     get:
+      operationId: listAlerts
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Alert rules
+      security: [ { session: [] }, { apiKey: [] } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlertRule" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
+      operationId: createAlert
+      x-hlens-mcp: createAlert
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Create an alert rule
+      security: [ { session: [] }, { apiKey: [] } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleInput" } } } }
       responses:
-        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } }
-        "402": { description: plan limit reached }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { description: Plan limit reached, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /me/alerts/{id}:
     patch:
+      operationId: updateAlert
       tags: [me]
-      security: [ { bearer: [] } ]
-      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleInput" } } } }
-      responses: { "200": { content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } } }
+      summary: Update an alert rule
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleInput" } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRule" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
+      operationId: deleteAlert
       tags: [me]
-      security: [ { bearer: [] } ]
-      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
-      responses: { "204": { description: deleted } }
+      summary: Delete an alert rule
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /me/alerts:pause-all:
+    post:
+      operationId: pauseAllAlerts
+      tags: [me]
+      summary: Pause or resume all rules
+      security: [ { session: [] }, { apiKey: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [paused], properties: { paused: { type: boolean } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AlertRuleList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /me/alerts/deliveries:
     get:
+      operationId: listAlertDeliveries
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Delivery log
+      security: [ { session: [] }, { apiKey: [] } ]
+      parameters: [ { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/AlertDelivery" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AlertDeliveryList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /me/digest:
+    post:
+      operationId: subscribeDigest
+      tags: [me]
+      summary: Subscribe / unsubscribe the daily digest
+      security: [ { session: [] }, { apiKey: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [enabled, channel], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/Channel" } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /me/push-subscriptions:
+    get:
+      operationId: listPushSubscriptions
+      tags: [me]
+      summary: Web Push subscriptions
+      security: [ { session: [] } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscriptionList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createPushSubscription
+      tags: [me]
+      summary: Register a Web Push subscription (iOS requires an installed PWA)
+      security: [ { session: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscriptionInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscription" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /me/push-subscriptions/{id}:
+    delete:
+      operationId: deletePushSubscription
+      tags: [me]
+      summary: Remove a Web Push subscription
+      security: [ { session: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /me/api-keys:
     get:
+      operationId: listApiKeys
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: API keys (prefix only)
+      security: [ { session: [] } ]
       responses:
-        "200": { content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } } } } }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ApiKeyList" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
+      operationId: createApiKey
       tags: [me]
-      security: [ { bearer: [] } ]
+      summary: Create an API key (session only; secret shown once)
+      security: [ { session: [] } ]
+      requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { label: { type: string, maxLength: 64 } } } } } }
       responses:
-        "201": { content: { application/json: { schema: { $ref: "#/components/schemas/ApiKeyCreated" } } } }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/ApiKeyCreated" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { description: Plan limit reached, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /me/api-keys/{id}:
+    delete:
+      operationId: deleteApiKey
+      tags: [me]
+      summary: Revoke an API key
+      security: [ { session: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdPath" } ]
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
-    bearer: { type: http, scheme: bearer }
+    session: { type: http, scheme: bearer, description: Session token from magic-link / OAuth login }
+    apiKey: { type: apiKey, in: header, name: X-API-Key }
+
+  headers:
+    ETag: { description: Entity tag for conditional requests, schema: { type: string } }
+    X-RateLimit-Limit: { description: Requests allowed per minute, schema: { type: integer } }
+    X-RateLimit-Remaining: { description: Requests remaining in the window, schema: { type: integer } }
+    X-RateLimit-Reset: { description: Unix seconds when the window resets, schema: { type: integer } }
+
   parameters:
-    Symbol: { name: symbol, in: path, required: true, schema: { type: string, example: BTC } }
-    Address: { name: address, in: path, required: true, schema: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" } }
-    From: { name: from, in: query, schema: { type: integer, description: unix ms } }
-    To: { name: to, in: query, schema: { type: integer, description: unix ms } }
+    SymbolPath: { name: symbol, in: path, required: true, schema: { $ref: "#/components/schemas/Symbol" } }
+    SymbolQuery: { name: symbol, in: query, schema: { $ref: "#/components/schemas/Symbol" } }
+    AddressPath: { name: address, in: path, required: true, schema: { $ref: "#/components/schemas/Address" } }
+    IdPath: { name: id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" } }
+    Currency: { name: currency, in: path, required: true, schema: { $ref: "#/components/schemas/Currency" } }
+    From: { name: from, in: query, schema: { $ref: "#/components/schemas/Ts" } }
+    To: { name: to, in: query, schema: { $ref: "#/components/schemas/Ts" } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+    Cursor: { name: cursor, in: query, schema: { type: string, maxLength: 512 } }
+
   responses:
-    NotFound:
-      description: not found
-      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    BadRequest: { description: Invalid parameters, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unauthorized: { description: Missing or invalid credentials, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: Not found, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    TooManyRequests: { description: Rate limited; honour Retry-After, headers: { Retry-After: { schema: { type: integer } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    ServerError: { description: Server error, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   schemas:
+    # ---------- primitives
+    Ts: { type: integer, description: unix milliseconds, minimum: 0, examples: [1789139919832] }
+    Symbol: { type: string, pattern: "^[A-Z0-9]{1,15}$", examples: [BTC] }
+    Address: { type: string, pattern: "^0x[0-9a-fA-F]{40}$" }
+    Currency: { type: string, enum: [BTC, ETH] }
+    Locale: { type: string, enum: [en, zh], default: en }
+    Venue: { type: string, enum: [binance, bybit, okx, gate, bitget, hyperliquid, deribit] }
+    Side: { type: string, enum: [long, short] }
+    Channel: { type: string, enum: [telegram, email, push] }
+    Preset: { type: string, enum: [short_concentration_high, long_concentration_high, retail_vs_whale, oi_surge, negative_funding, whale_flip, pullback_shallow, squeeze] }
+    HistoryField: { type: string, enum: [price, crowding, funding_8h, oi_total_usd, oi_usd, retail_long_share, top_trader_long_share, taker_buy_share, whale_long_share, whale_net_usd, liq_long_usd, liq_short_usd] }
+    EvidenceTag: { type: string, enum: [verified, self_validated, heuristic, opinion, insufficient, model_estimated] }
+    SourceState: { type: string, enum: [ok, stale, error] }
+    SourceStatus: { type: object, additionalProperties: { $ref: "#/components/schemas/SourceState" } }
+    NullableNumber: { type: [number, "null"] }
+
     Error:
       type: object
       required: [code, message, request_id]
@@ -390,137 +820,198 @@ components:
         details: { type: object, additionalProperties: true }
         request_id: { type: string }
 
-    EvidenceTag:
-      type: string
-      enum: [verified, self_validated, heuristic, opinion]
+    # ---------- sentences
+    SentenceVar:
+      type: object
+      required: [v, type]
+      properties:
+        v: { type: [number, string, "null"] }
+        type: { type: string, enum: [pct, usd, ratio, bps, ts, atr, count, text, pctl] }
+        prec: { type: integer, minimum: 0, maximum: 6 }
     Sentence:
       type: object
-      required: [zh, en, template_id, tags]
+      required: [template_id, vars, tags, zh, en]
       properties:
+        template_id: { type: string, examples: [S.UP_PULLBACK_SHALLOW] }
+        vars: { type: object, additionalProperties: { $ref: "#/components/schemas/SentenceVar" } }
+        tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } }
+        zh: { type: string, description: server-rendered fallback }
+        en: { type: string, description: server-rendered fallback }
+        contradiction: { oneOf: [ { $ref: "#/components/schemas/SentenceLite" }, { type: "null" } ] }
+    SentenceLite:
+      type: object
+      required: [template_id, vars, zh, en]
+      properties:
+        template_id: { type: string }
+        vars: { type: object, additionalProperties: { $ref: "#/components/schemas/SentenceVar" } }
         zh: { type: string }
         en: { type: string }
-        template_id: { type: string, example: S.UP_HEALTHY_PB }
-        tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } }
-        contradiction: { type: object, nullable: true, properties: { zh: { type: string }, en: { type: string }, template_id: { type: string } } }
-
-    SourceStatus:
+    Explanation:
       type: object
-      additionalProperties: { type: string, enum: [ok, stale, error] }
+      required: [symbol, as_of, sentences, inputs]
+      properties:
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sentences: { type: array, items: { $ref: "#/components/schemas/Sentence" } }
+        inputs: { type: object, additionalProperties: true, description: the numbers the sentences were built from }
 
-    Venue:
+    # ---------- state
+    StateGroup: { type: string, enum: [up, down, range, squeeze, transition] }
+    StateId:
       type: string
-      enum: [binance, bybit, okx, gate, bitget, hyperliquid]
+      description: 16 states; group membership is defined in config/state_rules.v{n}.yaml
+      enum: [up_impulse, up_pullback_shallow, up_pullback_leveraged, up_overheated, up_exhaustion,
+             down_impulse, down_bounce_shallow, down_bounce_leveraged, down_capitulation, down_exhaustion,
+             range_top, range_mid, range_bottom, squeeze, breakout_pending, false_breakout]
+    RuleHit:
+      type: object
+      required: [rule, hit]
+      properties:
+        rule: { type: string }
+        value: { $ref: "#/components/schemas/NullableNumber" }
+        threshold: { type: string }
+        hit: { type: boolean }
+    StateStats:
+      type: object
+      description: Scorecard line shown next to every state chip; null fields when insufficient
+      required: [n, tag]
+      properties:
+        n: { type: integer }
+        median_ret_24h: { $ref: "#/components/schemas/NullableNumber" }
+        p_break_low: { $ref: "#/components/schemas/NullableNumber" }
+        tag: { $ref: "#/components/schemas/EvidenceTag" }
+    TimeframeState:
+      type: object
+      required: [tf, state, group, since_ts, display_tier, stats]
+      properties:
+        tf: { type: string, enum: [1h, 4h, 1d] }
+        state: { $ref: "#/components/schemas/StateId" }
+        group: { $ref: "#/components/schemas/StateGroup" }
+        since_ts: { $ref: "#/components/schemas/Ts" }
+        confirmed: { type: boolean, description: held for at least 2 bars }
+        display_tier: { type: string, enum: [provisional, validated], description: provisional states use neutral names in the UI }
+        rules: { type: array, items: { $ref: "#/components/schemas/RuleHit" } }
+        stats: { $ref: "#/components/schemas/StateStats" }
+    MarketState:
+      type: object
+      required: [rules_version, timeframes]
+      properties:
+        rules_version: { type: string, examples: [v1] }
+        timeframes: { type: array, items: { $ref: "#/components/schemas/TimeframeState" } }
+        combined: { oneOf: [ { $ref: "#/components/schemas/Sentence" }, { type: "null" } ] }
 
+    # ---------- prism
     VenueRow:
       type: object
       required: [venue, ok]
       properties:
         venue: { $ref: "#/components/schemas/Venue" }
         ok: { type: boolean }
-        price: { type: number, nullable: true }
-        funding: { type: number, nullable: true, description: raw rate per interval }
-        funding_interval_h: { type: integer, nullable: true }
-        funding_8h: { type: number, nullable: true }
-        funding_apr_pct: { type: number, nullable: true }
-        next_funding_ts: { type: integer, nullable: true }
-        oi_usd: { type: number, nullable: true }
-        vol24h_usd: { type: number, nullable: true }
-        retail_long_share: { type: number, nullable: true }
-        top_trader_long_share: { type: number, nullable: true }
-        taker_buy_share: { type: number, nullable: true }
-        premium: { type: number, nullable: true, description: (mark-index)/index }
-
+        as_of: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        price: { $ref: "#/components/schemas/NullableNumber" }
+        funding: { $ref: "#/components/schemas/NullableNumber" }
+        funding_interval_h: { type: [integer, "null"] }
+        funding_8h: { $ref: "#/components/schemas/NullableNumber" }
+        funding_apr_pct: { $ref: "#/components/schemas/NullableNumber" }
+        funding_predicted: { $ref: "#/components/schemas/NullableNumber" }
+        next_funding_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        oi_usd: { $ref: "#/components/schemas/NullableNumber" }
+        vol24h_usd: { $ref: "#/components/schemas/NullableNumber" }
+        retail_long_share: { $ref: "#/components/schemas/NullableNumber" }
+        top_trader_long_share: { $ref: "#/components/schemas/NullableNumber" }
+        taker_buy_share: { $ref: "#/components/schemas/NullableNumber" }
+        premium: { $ref: "#/components/schemas/NullableNumber" }
+    Facet:
+      type: object
+      description: One spectrum row — value, its 30-day percentile and sample size when applicable
+      required: [value, n]
+      properties:
+        value: { $ref: "#/components/schemas/NullableNumber" }
+        pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+        n: { type: integer, description: contributing venues or wallets; UI greys the row when n < 10 for whales }
+        as_of: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        tag: { $ref: "#/components/schemas/EvidenceTag" }
     Facets:
       type: object
+      required: [retail_long_share, top_trader_long_share, taker_buy_share, whale_long_share, funding_8h, oi_total_usd]
       properties:
-        retail_long_share: { type: number, nullable: true }
-        top_trader_long_share: { type: number, nullable: true }
-        taker_buy_share: { type: number, nullable: true }
-        whale_long_share: { type: number, nullable: true }
-        whale_n: { type: integer }
-        whale_long_usd: { type: number, nullable: true }
-        whale_short_usd: { type: number, nullable: true }
-        funding_8h: { type: number, nullable: true }
-        funding_apr_pct: { type: number, nullable: true }
-        oi_total_usd: { type: number, nullable: true }
-        oi_pctl_30d: { type: number, nullable: true, description: 0..1 percentile }
-        liq_24h_long_usd: { type: number, nullable: true }
-        liq_24h_short_usd: { type: number, nullable: true }
-
-    StateGroup: { type: string, enum: [up, down, range, squeeze, transition] }
-    StateId:
-      type: string
-      enum: [up_impulse, up_healthy_pullback, up_risky_pullback, up_overheated, up_exhaustion,
-             down_impulse, down_healthy_bounce, down_risky_bounce, down_capitulation, down_exhaustion,
-             range_top, range_mid, range_bottom, squeeze, breakout_pending, false_breakout]
-    RuleHit:
-      type: object
-      properties: { rule: { type: string }, value: { type: number, nullable: true }, threshold: { type: string }, hit: { type: boolean } }
-    TimeframeState:
-      type: object
-      required: [tf, state, group, since_ts]
-      properties:
-        tf: { type: string, enum: [1h, 4h, 1d] }
-        state: { $ref: "#/components/schemas/StateId" }
-        group: { $ref: "#/components/schemas/StateGroup" }
-        since_ts: { type: integer }
-        rules: { type: array, items: { $ref: "#/components/schemas/RuleHit" } }
-    MarketState:
-      type: object
-      required: [rules_version, timeframes]
-      properties:
-        rules_version: { type: string, example: v1 }
-        timeframes: { type: array, items: { $ref: "#/components/schemas/TimeframeState" } }
-        combined: { $ref: "#/components/schemas/Sentence" }
-
+        retail_long_share: { $ref: "#/components/schemas/Facet" }
+        top_trader_long_share: { $ref: "#/components/schemas/Facet" }
+        taker_buy_share: { $ref: "#/components/schemas/Facet" }
+        whale_long_share: { $ref: "#/components/schemas/Facet" }
+        funding_8h: { $ref: "#/components/schemas/Facet" }
+        funding_apr_pct: { $ref: "#/components/schemas/Facet" }
+        oi_total_usd: { $ref: "#/components/schemas/Facet" }
+        liq_24h_long_usd: { $ref: "#/components/schemas/Facet" }
+        liq_24h_short_usd: { $ref: "#/components/schemas/Facet" }
+        whale_long_usd: { $ref: "#/components/schemas/NullableNumber" }
+        whale_short_usd: { $ref: "#/components/schemas/NullableNumber" }
+        gap_pts: { $ref: "#/components/schemas/NullableNumber", description: "|retail − whale| × 100, null when whale n < 10" }
     Prism:
       type: object
-      required: [symbol, as_of, sources, facets, crowding, venues, sentence]
+      required: [symbol, as_of, sources, price, chg24h_pct, facets, crowding, venues, sentence]
       properties:
-        symbol: { type: string }
-        as_of: { type: integer }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
         sources: { $ref: "#/components/schemas/SourceStatus" }
-        price: { type: number, nullable: true }
-        chg24h_pct: { type: number, nullable: true }
-        vol24h_total_usd: { type: number, nullable: true }
+        price: { $ref: "#/components/schemas/NullableNumber" }
+        chg24h_pct: { $ref: "#/components/schemas/NullableNumber" }
+        vol24h_total_usd: { $ref: "#/components/schemas/NullableNumber" }
         facets: { $ref: "#/components/schemas/Facets" }
-        crowding: { type: number, nullable: true, minimum: -1, maximum: 1 }
-        crowding_pctl_30d: { type: number, nullable: true }
-        state: { $ref: "#/components/schemas/MarketState" }
+        crowding: { type: [number, "null"], minimum: -1, maximum: 1 }
+        crowding_pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+        state: { oneOf: [ { $ref: "#/components/schemas/MarketState" }, { type: "null" } ] }
         venues: { type: array, items: { $ref: "#/components/schemas/VenueRow" } }
         sentence: { $ref: "#/components/schemas/Sentence" }
+    PrismPatch:
+      type: object
+      description: JSON Merge Patch of Prism pushed over WS
+      additionalProperties: true
 
     CoinSummary:
       type: object
-      required: [symbol]
+      required: [symbol, as_of, whale_n]
       properties:
-        symbol: { type: string }
-        price: { type: number, nullable: true }
-        chg24h_pct: { type: number, nullable: true }
-        oi_total_usd: { type: number, nullable: true }
-        oi_chg24h_pct: { type: number, nullable: true }
-        funding_8h: { type: number, nullable: true }
-        funding_apr_pct: { type: number, nullable: true }
-        funding_spread: { type: number, nullable: true }
-        retail_long_share: { type: number, nullable: true }
-        top_trader_long_share: { type: number, nullable: true }
-        whale_long_share: { type: number, nullable: true }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        price: { $ref: "#/components/schemas/NullableNumber" }
+        chg24h_pct: { $ref: "#/components/schemas/NullableNumber" }
+        oi_total_usd: { $ref: "#/components/schemas/NullableNumber" }
+        oi_chg24h_pct: { $ref: "#/components/schemas/NullableNumber" }
+        oi_pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+        funding_8h: { $ref: "#/components/schemas/NullableNumber" }
+        funding_apr_pct: { $ref: "#/components/schemas/NullableNumber" }
+        funding_spread: { $ref: "#/components/schemas/NullableNumber" }
+        retail_long_share: { $ref: "#/components/schemas/NullableNumber" }
+        top_trader_long_share: { $ref: "#/components/schemas/NullableNumber" }
+        taker_buy_share: { $ref: "#/components/schemas/NullableNumber" }
+        whale_long_share: { $ref: "#/components/schemas/NullableNumber" }
         whale_n: { type: integer }
-        crowding: { type: number, nullable: true }
-        liq_24h_usd: { type: number, nullable: true }
-        state_1h: { $ref: "#/components/schemas/StateId" }
-        state_4h: { $ref: "#/components/schemas/StateId" }
-        state_1d: { $ref: "#/components/schemas/StateId" }
-        why: { $ref: "#/components/schemas/Sentence", description: present when preset is used }
-        extra: { type: object, additionalProperties: true, description: columns requested via cols }
+        gap_pts: { $ref: "#/components/schemas/NullableNumber" }
+        crowding: { $ref: "#/components/schemas/NullableNumber" }
+        crowding_pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+        liq_24h_long_usd: { $ref: "#/components/schemas/NullableNumber" }
+        liq_24h_short_usd: { $ref: "#/components/schemas/NullableNumber" }
+        vol24h_usd: { $ref: "#/components/schemas/NullableNumber" }
+        state_1h: { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        state_4h: { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        state_1d: { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        state_group_1h: { oneOf: [ { $ref: "#/components/schemas/StateGroup" }, { type: "null" } ] }
+        state_group_4h: { oneOf: [ { $ref: "#/components/schemas/StateGroup" }, { type: "null" } ] }
+        state_group_1d: { oneOf: [ { $ref: "#/components/schemas/StateGroup" }, { type: "null" } ] }
+        state_since_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        why: { oneOf: [ { $ref: "#/components/schemas/Sentence" }, { type: "null" } ], description: present when preset is used }
     CoinList:
       type: object
-      required: [as_of, items]
+      required: [as_of, sources, items]
       properties:
-        as_of: { type: integer }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        coverage: { type: integer, description: number of coins covered; UI shows it honestly }
         items: { type: array, items: { $ref: "#/components/schemas/CoinSummary" } }
-        next_cursor: { type: string, nullable: true }
+        next_cursor: { type: [string, "null"] }
 
+    # ---------- context
     KeyLevel:
       type: object
       required: [kind, price, dist_pct]
@@ -531,402 +1022,881 @@ components:
         overlaps_liq_cluster: { type: boolean }
     Session:
       type: object
-      properties: { name: { type: string, enum: [asia, europe, us] }, ret_pct: { type: number, nullable: true } }
+      required: [name]
+      properties:
+        name: { type: string, enum: [asia, europe, us] }
+        ret_pct: { $ref: "#/components/schemas/NullableNumber" }
     OIQuadrant: { type: string, enum: [price_up_oi_up, price_up_oi_down, price_down_oi_up, price_down_oi_down] }
+    EmaSet:
+      type: object
+      required: [tf]
+      properties:
+        tf: { type: string, enum: [1h, 4h, 1d] }
+        ema20: { $ref: "#/components/schemas/NullableNumber" }
+        ema50: { $ref: "#/components/schemas/NullableNumber" }
+        ema200: { $ref: "#/components/schemas/NullableNumber" }
+        above20: { type: [boolean, "null"] }
+        above50: { type: [boolean, "null"] }
+        above200: { type: [boolean, "null"] }
+    RangeBox:
+      type: object
+      required: [low, high, pos_pct]
+      properties: { low: { type: number }, high: { type: number }, pos_pct: { type: number } }
+    VolRegime:
+      type: object
+      required: [atr14, atr_pctl_90d, regime, realized_24h_pct]
+      properties:
+        atr14: { type: number }
+        atr_pctl_90d: { type: number }
+        regime: { type: string, enum: [low, normal, high, extreme] }
+        implied_daily_pct: { $ref: "#/components/schemas/NullableNumber" }
+        realized_24h_pct: { type: number }
+    Move15m:
+      type: object
+      required: [ts, pct]
+      properties:
+        ts: { $ref: "#/components/schemas/Ts" }
+        pct: { type: number }
+        liq_usd: { $ref: "#/components/schemas/NullableNumber" }
+    Last24h:
+      type: object
+      required: [high, low, range_pct, pos_pct, oi_quadrant]
+      properties:
+        high: { type: number }
+        low: { type: number }
+        range_pct: { type: number }
+        pos_pct: { type: number }
+        vol_ratio_30d: { $ref: "#/components/schemas/NullableNumber" }
+        max_15m_move: { oneOf: [ { $ref: "#/components/schemas/Move15m" }, { type: "null" } ] }
+        sessions: { type: array, items: { $ref: "#/components/schemas/Session" } }
+        oi_chg_pct: { $ref: "#/components/schemas/NullableNumber" }
+        oi_quadrant: { oneOf: [ { $ref: "#/components/schemas/OIQuadrant" }, { type: "null" } ] }
+        funding_chg: { $ref: "#/components/schemas/NullableNumber" }
+        liq_long_usd: { $ref: "#/components/schemas/NullableNumber" }
+        liq_short_usd: { $ref: "#/components/schemas/NullableNumber" }
+        whale_net_open_usd: { $ref: "#/components/schemas/NullableNumber" }
+    Breakout:
+      type: object
+      required: [level, ts, verdict]
+      properties:
+        level: { $ref: "#/components/schemas/KeyLevel" }
+        ts: { $ref: "#/components/schemas/Ts" }
+        oi_chg_pct: { $ref: "#/components/schemas/NullableNumber" }
+        cvd_dir: { type: [string, "null"] }
+        vol_ratio: { $ref: "#/components/schemas/NullableNumber" }
+        verdict: { type: string, enum: [aligned, mixed] }
+    Drivers:
+      type: object
+      required: [led_by]
+      properties:
+        led_by: { type: string, enum: [spot, perp, mixed, unknown] }
+        premium_24h: { oneOf: [ { $ref: "#/components/schemas/Series" }, { type: "null" } ] }
+        breakout: { oneOf: [ { $ref: "#/components/schemas/Breakout" }, { type: "null" } ] }
+        oi_to_mcap: { $ref: "#/components/schemas/NullableNumber" }
+        oi_to_mcap_pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+    RiskCalc:
+      type: object
+      description: Inputs for a pure calculator; the UI never pre-fills or recommends
+      required: [atr14, formula_id]
+      properties:
+        atr14: { type: number }
+        formula_id: { type: string, enum: [atr_stop_v1] }
+    ContextSentences:
+      type: object
+      required: [state, position, driver, volatility]
+      properties:
+        state: { $ref: "#/components/schemas/Sentence" }
+        position: { $ref: "#/components/schemas/Sentence" }
+        driver: { $ref: "#/components/schemas/Sentence" }
+        volatility: { $ref: "#/components/schemas/Sentence" }
     Context:
       type: object
-      required: [symbol, as_of, sentences, state]
+      required: [symbol, as_of, sources, sentences, state, key_levels, last24h, vol, drivers]
       properties:
-        symbol: { type: string }
-        as_of: { type: integer }
-        sentences:
-          type: object
-          properties:
-            state: { $ref: "#/components/schemas/Sentence" }
-            position: { $ref: "#/components/schemas/Sentence" }
-            driver: { $ref: "#/components/schemas/Sentence" }
-            volatility: { $ref: "#/components/schemas/Sentence" }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        sentences: { $ref: "#/components/schemas/ContextSentences" }
         state: { $ref: "#/components/schemas/MarketState" }
-        ema:
-          type: object
-          additionalProperties:
-            type: object
-            properties: { ema20: { type: number }, ema50: { type: number }, ema200: { type: number }, above20: { type: boolean }, above50: { type: boolean }, above200: { type: boolean } }
-        range: { type: object, nullable: true, properties: { low: { type: number }, high: { type: number }, pos_pct: { type: number } } }
-        vol:
-          type: object
-          properties: { atr14: { type: number }, atr_pctl_90d: { type: number }, regime: { type: string, enum: [low, normal, high, extreme] }, implied_daily_pct: { type: number, nullable: true }, realized_24h_pct: { type: number } }
-        btc_corr_7d: { type: number, nullable: true }
-        btc_beta_7d: { type: number, nullable: true }
+        ema: { type: array, items: { $ref: "#/components/schemas/EmaSet" } }
+        range: { oneOf: [ { $ref: "#/components/schemas/RangeBox" }, { type: "null" } ] }
+        vol: { $ref: "#/components/schemas/VolRegime" }
+        btc_corr_7d: { $ref: "#/components/schemas/NullableNumber" }
+        btc_beta_7d: { $ref: "#/components/schemas/NullableNumber" }
         key_levels: { type: array, items: { $ref: "#/components/schemas/KeyLevel" } }
-        last24h:
-          type: object
-          properties:
-            high: { type: number }
-            low: { type: number }
-            range_pct: { type: number }
-            pos_pct: { type: number }
-            vol_ratio_30d: { type: number }
-            max_15m_move: { type: object, properties: { ts: { type: integer }, pct: { type: number }, liq_usd: { type: number } } }
-            sessions: { type: array, items: { $ref: "#/components/schemas/Session" } }
-            oi_chg_pct: { type: number }
-            oi_quadrant: { $ref: "#/components/schemas/OIQuadrant" }
-            funding_chg: { type: number }
-            liq_long_usd: { type: number }
-            liq_short_usd: { type: number }
-            whale_net_open_usd: { type: number }
-        drivers:
-          type: object
-          properties:
-            led_by: { type: string, enum: [spot, perp, mixed, unknown] }
-            premium_24h: { $ref: "#/components/schemas/Series" }
-            cvd_spot: { $ref: "#/components/schemas/Series" }
-            cvd_perp: { $ref: "#/components/schemas/Series" }
-            breakout: { type: object, nullable: true, properties: { level: { $ref: "#/components/schemas/KeyLevel" }, ts: { type: integer }, oi_chg_pct: { type: number }, cvd_dir: { type: string }, vol_ratio: { type: number }, verdict: { type: string, enum: [aligned, mixed] } } }
-            book: { type: object, nullable: true, properties: { bid_1pct_usd: { type: number }, ask_1pct_usd: { type: number }, bid_2pct_usd: { type: number }, ask_2pct_usd: { type: number }, pctl_30d: { type: number } } }
-            oi_to_mcap: { type: number, nullable: true }
-            oi_to_mcap_pctl_30d: { type: number, nullable: true }
-            options: { type: object, nullable: true, properties: { dvol: { type: number }, implied_daily_pct: { type: number }, skew_25d: { type: number }, max_pain_week: { type: number } } }
-            basis_apr_pct: { type: number, nullable: true }
-        risk_sizer:
-          type: object
-          properties: { atr14: { type: number }, formula: { type: string } }
+        last24h: { $ref: "#/components/schemas/Last24h" }
+        drivers: { $ref: "#/components/schemas/Drivers" }
+        risk_calc: { oneOf: [ { $ref: "#/components/schemas/RiskCalc" }, { type: "null" } ] }
         calendar: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } }
 
+    # ---------- levels
     LiqCluster:
       type: object
-      properties: { price: { type: number }, side: { type: string, enum: [long, short] }, est_usd: { type: number }, model: { type: string, const: estimated } }
+      required: [price, side, est_notional_usd, tag]
+      properties:
+        price: { type: number }
+        side: { $ref: "#/components/schemas/Side" }
+        est_notional_usd: { type: number }
+        tag: { type: string, enum: [model_estimated] }
     WhaleLiqPoint:
       type: object
-      properties: { price: { type: number }, side: { type: string, enum: [long, short] }, notional_usd: { type: number }, address: { type: string }, name: { type: string, nullable: true } }
+      required: [price, side, notional_usd, address]
+      properties:
+        price: { type: number }
+        side: { $ref: "#/components/schemas/Side" }
+        notional_usd: { type: number }
+        address: { $ref: "#/components/schemas/Address" }
+        name: { type: [string, "null"] }
+        liq_px_reliable: { type: boolean }
+    RealLiqPoint:
+      type: object
+      required: [price, side, notional_usd]
+      properties:
+        price: { type: number }
+        side: { $ref: "#/components/schemas/Side" }
+        notional_usd: { type: number }
+        venue: { $ref: "#/components/schemas/Venue" }
     Levels:
       type: object
-      required: [symbol, as_of, price, liq_clusters, whale_liq, real_liq_24h, sentence]
+      required: [symbol, as_of, sources, price, range_pct, whale_liq, real_liq_24h, liq_clusters, sentence]
       properties:
-        symbol: { type: string }
-        as_of: { type: integer }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
         price: { type: number }
         range_pct: { type: number }
         lev_weights: { type: object, additionalProperties: { type: number } }
-        liq_clusters: { type: array, items: { $ref: "#/components/schemas/LiqCluster" } }
         whale_liq: { type: array, items: { $ref: "#/components/schemas/WhaleLiqPoint" } }
-        real_liq_24h: { type: array, items: { type: object, properties: { price: { type: number }, side: { type: string }, usd: { type: number } } } }
-        totals: { type: object, properties: { above_short_usd: { type: number }, below_long_usd: { type: number } } }
+        real_liq_24h: { type: array, items: { $ref: "#/components/schemas/RealLiqPoint" } }
+        liq_clusters: { type: array, items: { $ref: "#/components/schemas/LiqCluster" } }
+        totals: { type: object, properties: { above_short_est_usd: { type: number }, below_long_est_usd: { type: number }, real_24h_long_usd: { type: number }, real_24h_short_usd: { type: number } } }
         sentence: { $ref: "#/components/schemas/Sentence" }
 
+    # ---------- series
     Series:
       type: object
       required: [fields, points]
       properties:
         fields: { type: array, items: { type: string } }
-        points: { type: array, items: { type: array, items: { type: number, nullable: true }, description: "[ts, f1, f2, ...]" } }
+        points:
+          type: array
+          description: "each point is [ts, f1, f2, ...] aligned with fields"
+          items:
+            type: array
+            prefixItems: [ { $ref: "#/components/schemas/Ts" } ]
+            items: { $ref: "#/components/schemas/NullableNumber" }
+    StateHistoryPoint:
+      type: array
+      prefixItems:
+        - { $ref: "#/components/schemas/Ts" }
+        - { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        - { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        - { oneOf: [ { $ref: "#/components/schemas/StateId" }, { type: "null" } ] }
+        - { $ref: "#/components/schemas/NullableNumber" }
+      items: false
     StateHistory:
       type: object
+      required: [symbol, rules_version, hours]
       properties:
-        symbol: { type: string }
+        symbol: { $ref: "#/components/schemas/Symbol" }
         rules_version: { type: string }
-        hours: { type: array, items: { type: array, items: {}, description: "[ts, state_1h, state_4h, state_1d, price]" } }
+        hours: { type: array, items: { $ref: "#/components/schemas/StateHistoryPoint" } }
     Snapshot:
       type: object
       required: [at, prism]
       properties:
-        at: { type: integer }
+        at: { $ref: "#/components/schemas/Ts" }
         prism: { $ref: "#/components/schemas/Prism" }
-        around: { $ref: "#/components/schemas/Series" }
+        around: { oneOf: [ { $ref: "#/components/schemas/Series" }, { type: "null" } ] }
         events: { type: array, items: { $ref: "#/components/schemas/Event" } }
-        replay_sentence: { $ref: "#/components/schemas/Sentence" }
+        replay_sentence: { oneOf: [ { $ref: "#/components/schemas/Sentence" }, { type: "null" } ] }
     Breadth:
       type: object
+      required: [as_of, n, up_24h_share, above_ema20_share, oi_up_share, sentence]
       properties:
-        as_of: { type: integer }
+        as_of: { $ref: "#/components/schemas/Ts" }
         n: { type: integer }
         up_24h_share: { type: number }
         above_ema20_share: { type: number }
         oi_up_share: { type: number }
-        alt_vs_btc_24h_pct: { type: number }
-        sessions_7d: { type: array, items: { type: object, properties: { date: { type: string }, asia: { type: number }, europe: { type: number }, us: { type: number } } } }
+        alt_vs_btc_24h_pct: { $ref: "#/components/schemas/NullableNumber" }
+        sessions_7d: { type: array, items: { type: object, required: [date], properties: { date: { type: string, format: date }, asia: { $ref: "#/components/schemas/NullableNumber" }, europe: { $ref: "#/components/schemas/NullableNumber" }, us: { $ref: "#/components/schemas/NullableNumber" } } } }
+        sentence: { $ref: "#/components/schemas/Sentence" }
+    AbnormalCoin:
+      type: object
+      required: [symbol, reason, sentence]
+      properties:
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        reason: { type: string, enum: [gap, funding, whale_flip, crowding, cascade, oi_surge] }
         sentence: { $ref: "#/components/schemas/Sentence" }
     InsightCard:
       type: object
+      required: [id, items, link]
       properties:
-        id: { type: string, enum: [late, danger, whales, missed, cost, rekt_soon] }
-        title: { type: object, properties: { zh: { type: string }, en: { type: string } } }
+        id: { type: string, enum: [late, danger, whales] }
         items: { type: array, items: { type: object, additionalProperties: true } }
         link: { type: string }
     Insights:
       type: object
+      required: [as_of, sources, abnormal, sentence, cards]
       properties:
-        as_of: { type: integer }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        abnormal: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/AbnormalCoin" } }
         sentence: { $ref: "#/components/schemas/Sentence" }
         cards: { type: array, items: { $ref: "#/components/schemas/InsightCard" } }
 
+    # ---------- funding
+    VenueFunding:
+      type: object
+      required: [venue]
+      properties:
+        venue: { $ref: "#/components/schemas/Venue" }
+        funding: { $ref: "#/components/schemas/NullableNumber" }
+        funding_interval_h: { type: [integer, "null"] }
+        funding_8h: { $ref: "#/components/schemas/NullableNumber" }
+        funding_apr_pct: { $ref: "#/components/schemas/NullableNumber" }
+        funding_predicted: { $ref: "#/components/schemas/NullableNumber" }
+        next_funding_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
     FundingRow:
       type: object
+      required: [symbol, venues]
       properties:
-        symbol: { type: string }
-        venues: { type: object, additionalProperties: { type: object, properties: { raw: { type: number }, interval_h: { type: integer }, f8h: { type: number }, apr_pct: { type: number }, predicted: { type: number, nullable: true }, next_ts: { type: integer } } } }
-        f8h_weighted: { type: number, nullable: true }
-        apr_pct: { type: number, nullable: true }
-        spread: { type: number, nullable: true }
-        oi_total_usd: { type: number, nullable: true }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        venues: { type: array, items: { $ref: "#/components/schemas/VenueFunding" } }
+        funding_8h_weighted: { $ref: "#/components/schemas/NullableNumber" }
+        funding_apr_pct: { $ref: "#/components/schemas/NullableNumber" }
+        funding_apr_pct_abs: { $ref: "#/components/schemas/NullableNumber" }
+        funding_spread: { $ref: "#/components/schemas/NullableNumber" }
+        oi_total_usd: { $ref: "#/components/schemas/NullableNumber" }
+    FundingList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/FundingRow" } }
+        next_cursor: { type: [string, "null"] }
     FundingHistory:
       type: object
+      required: [symbol, as_of, series]
       properties:
-        symbol: { type: string }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
         series: { $ref: "#/components/schemas/Series" }
-        cum_long_30d: { type: number }
-        cum_short_30d: { type: number }
+        cum_long_30d: { $ref: "#/components/schemas/NullableNumber" }
+        cum_short_30d: { $ref: "#/components/schemas/NullableNumber" }
     ArbRow:
       type: object
-      properties: { symbol: { type: string }, long_venue: { $ref: "#/components/schemas/Venue" }, short_venue: { $ref: "#/components/schemas/Venue" }, spread_8h: { type: number }, gross_apr_pct: { type: number }, net_apr_pct: { type: number }, tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } } }
-    LSRatio:
+      required: [symbol, long_venue, short_venue, spread_8h, gross_apr_pct, net_apr_pct, tags]
+      properties:
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        long_venue: { $ref: "#/components/schemas/Venue" }
+        short_venue: { $ref: "#/components/schemas/Venue" }
+        spread_8h: { type: number }
+        gross_apr_pct: { type: number }
+        net_apr_pct: { type: number }
+        tags: { type: array, items: { $ref: "#/components/schemas/EvidenceTag" } }
+    ArbList:
       type: object
-      properties: { venue: { $ref: "#/components/schemas/Venue" }, kind: { type: string, enum: [account, top_account, top_position, taker] }, long_share: { type: number }, ts: { type: integer } }
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/ArbRow" } }
+    LsRatio:
+      type: object
+      required: [venue, kind, long_share, ts]
+      properties:
+        venue: { $ref: "#/components/schemas/Venue" }
+        kind: { type: string, enum: [account, top_account, top_position, taker] }
+        long_share: { type: number }
+        ts: { $ref: "#/components/schemas/Ts" }
+    LsRatioList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/LsRatio" } }
 
+    # ---------- liquidations
     Liquidation:
       type: object
-      required: [ts, venue, symbol, side, price, usd]
+      required: [ts, venue, symbol, side, price, notional_usd]
       properties:
-        ts: { type: integer }
+        ts: { $ref: "#/components/schemas/Ts" }
         venue: { $ref: "#/components/schemas/Venue" }
-        symbol: { type: string }
-        side: { type: string, enum: [long, short] }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        side: { $ref: "#/components/schemas/Side" }
         price: { type: number }
-        qty: { type: number }
-        usd: { type: number }
-        cascade_id: { type: string, nullable: true }
+        size: { type: number }
+        notional_usd: { type: number }
+        cascade_id: { type: [string, "null"] }
+        throttled_source: { type: boolean, description: true when the venue feed is rate-limited (lower bound) }
+    LiquidationList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/Liquidation" } }
+        next_cursor: { type: [string, "null"] }
+    LiqBatch:
+      type: object
+      description: WS payload — liquidations aggregated over 250ms
+      required: [ts, items]
+      properties:
+        ts: { $ref: "#/components/schemas/Ts" }
+        items: { type: array, items: { $ref: "#/components/schemas/Liquidation" } }
     LiqAggRow:
       type: object
-      properties: { key: { type: string }, long_usd: { type: number }, short_usd: { type: number }, count: { type: integer } }
+      required: [key, long_usd, short_usd, count]
+      properties:
+        key: { type: string }
+        long_usd: { type: number }
+        short_usd: { type: number }
+        count: { type: integer }
+    LiqAggList:
+      type: object
+      required: [as_of, sources, window, group_by, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        window: { type: string }
+        group_by: { type: string }
+        items: { type: array, items: { $ref: "#/components/schemas/LiqAggRow" } }
     Heatmap:
       type: object
+      required: [symbol, as_of, tag, times, prices, grid, price_now]
       properties:
-        symbol: { type: string }
-        model: { type: string, const: estimated }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        tag: { type: string, enum: [model_estimated] }
         lev_weights: { type: object, additionalProperties: { type: number } }
-        times: { type: array, items: { type: integer } }
+        times: { type: array, items: { $ref: "#/components/schemas/Ts" } }
         prices: { type: array, items: { type: number } }
         grid: { type: array, items: { type: array, items: { type: number } } }
         price_now: { type: number }
     Cascade:
       type: object
-      properties: { id: { type: string }, symbol: { type: string }, side: { type: string }, start_ts: { type: integer }, end_ts: { type: integer }, usd: { type: number }, price_move_pct: { type: number } }
+      required: [id, symbol, side, start_ts, end_ts, notional_usd, price_move_pct]
+      properties:
+        id: { type: string }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        side: { $ref: "#/components/schemas/Side" }
+        start_ts: { $ref: "#/components/schemas/Ts" }
+        end_ts: { $ref: "#/components/schemas/Ts" }
+        notional_usd: { type: number }
+        price_move_pct: { type: number }
+        pctl_30d: { $ref: "#/components/schemas/NullableNumber" }
+    CascadeList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/Cascade" } }
+        next_cursor: { type: [string, "null"] }
 
+    # ---------- whales
     WhaleSource: { type: string, enum: [hyperliquid, okx] }
     WhalePosition:
       type: object
-      required: [address, source, symbol, side, notional_usd]
+      required: [address, source, symbol, side, size, notional_usd]
       properties:
-        address: { type: string }
-        name: { type: string, nullable: true }
+        address: { $ref: "#/components/schemas/Address" }
+        name: { type: [string, "null"] }
         source: { $ref: "#/components/schemas/WhaleSource" }
-        symbol: { type: string }
-        side: { type: string, enum: [long, short] }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        side: { $ref: "#/components/schemas/Side" }
         size: { type: number }
         notional_usd: { type: number }
-        entry: { type: number, nullable: true }
-        mark: { type: number, nullable: true }
-        liq: { type: number, nullable: true }
-        liq_distance_pct: { type: number, nullable: true }
-        lev: { type: number, nullable: true }
-        lev_type: { type: string, enum: [cross, isolated], nullable: true }
-        upnl_usd: { type: number, nullable: true }
-        roe: { type: number, nullable: true }
-        account_value_usd: { type: number, nullable: true }
-        opened_ts: { type: integer, nullable: true }
+        entry: { $ref: "#/components/schemas/NullableNumber" }
+        mark: { $ref: "#/components/schemas/NullableNumber" }
+        liq: { $ref: "#/components/schemas/NullableNumber" }
+        liq_px_reliable: { type: boolean }
+        liq_distance_pct: { $ref: "#/components/schemas/NullableNumber" }
+        lev: { $ref: "#/components/schemas/NullableNumber" }
+        lev_type: { type: [string, "null"], enum: [cross, isolated, null] }
+        upnl_usd: { $ref: "#/components/schemas/NullableNumber" }
+        roe: { $ref: "#/components/schemas/NullableNumber" }
+        account_value_usd: { $ref: "#/components/schemas/NullableNumber" }
+        opened_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+    WhalePositionList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
+        next_cursor: { type: [string, "null"] }
     Wallet:
       type: object
-      required: [address, source, account_value_usd]
+      required: [address, source, account_value_usd, n_pos, long_notional_usd, short_notional_usd, hit_rate_n]
       properties:
-        address: { type: string }
-        name: { type: string, nullable: true }
+        address: { $ref: "#/components/schemas/Address" }
+        name: { type: [string, "null"] }
         labels: { type: array, items: { type: string } }
         source: { $ref: "#/components/schemas/WhaleSource" }
         account_value_usd: { type: number }
         n_pos: { type: integer }
         long_notional_usd: { type: number }
         short_notional_usd: { type: number }
-        pnl_1d_usd: { type: number, nullable: true }
-        pnl_7d_usd: { type: number, nullable: true }
-        pnl_30d_usd: { type: number, nullable: true }
-        roi_30d: { type: number, nullable: true }
-        mdd_30d: { type: number, nullable: true }
-        hit_rate_24h: { type: number, nullable: true, description: site-computed, null when n<30 }
+        pnl_1d_usd: { $ref: "#/components/schemas/NullableNumber" }
+        pnl_7d_usd: { $ref: "#/components/schemas/NullableNumber" }
+        pnl_30d_usd: { $ref: "#/components/schemas/NullableNumber" }
+        roi_30d: { $ref: "#/components/schemas/NullableNumber" }
+        mdd_30d: { $ref: "#/components/schemas/NullableNumber" }
+        hit_rate_24h: { $ref: "#/components/schemas/NullableNumber", description: site-computed; null when hit_rate_n < 30 }
         hit_rate_n: { type: integer }
+        hit_rate_tag: { $ref: "#/components/schemas/EvidenceTag" }
         style_tags: { type: array, items: { type: string } }
         followers: { type: integer }
     WalletList:
       type: object
+      required: [as_of, sources, items]
       properties:
-        as_of: { type: integer }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
         items: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
-        next_cursor: { type: string, nullable: true }
+        next_cursor: { type: [string, "null"] }
     WalletDetail:
       allOf:
         - $ref: "#/components/schemas/Wallet"
         - type: object
+          required: [as_of, positions, recent_events]
           properties:
+            as_of: { $ref: "#/components/schemas/Ts" }
             positions: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
-            equity_curve: { $ref: "#/components/schemas/Series" }
+            equity_curve: { oneOf: [ { $ref: "#/components/schemas/Series" }, { type: "null" } ] }
             recent_events: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
     Fill:
       type: object
-      properties: { id: { type: string }, ts: { type: integer }, symbol: { type: string }, side: { type: string }, px: { type: number }, sz: { type: number }, usd: { type: number }, closed_pnl_usd: { type: number }, liquidation: { type: boolean } }
+      required: [id, ts, symbol, side, price, size, notional_usd, liquidation]
+      properties:
+        id: { type: string }
+        ts: { $ref: "#/components/schemas/Ts" }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        side: { type: string, enum: [buy, sell] }
+        dir: { type: [string, "null"], description: "e.g. Open Long / Close Short" }
+        price: { type: number }
+        size: { type: number }
+        notional_usd: { type: number }
+        closed_pnl_usd: { $ref: "#/components/schemas/NullableNumber" }
+        fee_usd: { $ref: "#/components/schemas/NullableNumber" }
+        liquidation: { type: boolean }
     FillList:
       type: object
-      properties: { items: { type: array, items: { $ref: "#/components/schemas/Fill" } }, next_cursor: { type: string, nullable: true } }
+      required: [as_of, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        items: { type: array, items: { $ref: "#/components/schemas/Fill" } }
+        next_cursor: { type: [string, "null"] }
     WhaleEventType: { type: string, enum: [open, add, reduce, close, flip, near_liq, liquidated] }
     WhaleEvent:
       type: object
-      required: [id, ts, address, source, symbol, type, side, notional_delta_usd]
+      required: [id, ts, address, source, symbol, type, side, notional_delta_usd, sentence]
       properties:
         id: { type: string }
-        ts: { type: integer }
-        address: { type: string }
-        name: { type: string, nullable: true }
+        ts: { $ref: "#/components/schemas/Ts" }
+        address: { $ref: "#/components/schemas/Address" }
+        name: { type: [string, "null"] }
         source: { $ref: "#/components/schemas/WhaleSource" }
-        symbol: { type: string }
+        symbol: { $ref: "#/components/schemas/Symbol" }
         type: { $ref: "#/components/schemas/WhaleEventType" }
-        side: { type: string, enum: [long, short] }
+        side: { $ref: "#/components/schemas/Side" }
+        size_delta: { $ref: "#/components/schemas/NullableNumber" }
         notional_delta_usd: { type: number }
-        px: { type: number, nullable: true }
-        account_value_usd: { type: number, nullable: true }
-        ret_1h: { type: number, nullable: true }
-        ret_4h: { type: number, nullable: true }
-        ret_24h: { type: number, nullable: true }
+        price: { $ref: "#/components/schemas/NullableNumber" }
+        account_value_usd: { $ref: "#/components/schemas/NullableNumber" }
+        ret_1h: { $ref: "#/components/schemas/NullableNumber" }
+        ret_4h: { $ref: "#/components/schemas/NullableNumber" }
+        ret_24h: { $ref: "#/components/schemas/NullableNumber" }
         sentence: { $ref: "#/components/schemas/Sentence" }
+        replay_url: { type: string }
     WhaleEventList:
       type: object
-      properties: { items: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }, next_cursor: { type: string, nullable: true } }
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
+        next_cursor: { type: [string, "null"] }
     WhaleCoinAgg:
       type: object
-      properties: { symbol: { type: string }, long_usd: { type: number }, short_usd: { type: number }, n_long: { type: integer }, n_short: { type: integer }, long_share: { type: number, nullable: true }, net_open_24h_usd: { type: number } }
+      required: [symbol, long_usd, short_usd, n_long, n_short]
+      properties:
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        long_usd: { type: number }
+        short_usd: { type: number }
+        n_long: { type: integer }
+        n_short: { type: integer }
+        whale_long_share: { $ref: "#/components/schemas/NullableNumber", description: null when n_long + n_short < 10 }
+        net_open_24h_usd: { $ref: "#/components/schemas/NullableNumber" }
+    WhaleCoinAggList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/WhaleCoinAgg" } }
     WhaleBoards:
       type: object
+      required: [as_of, sources, sentence, bets, rekt_soon, closed_loss, winners, losers]
       properties:
-        as_of: { type: integer }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
         sentence: { $ref: "#/components/schemas/Sentence" }
         bets: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
         rekt_soon: { type: array, items: { $ref: "#/components/schemas/WhalePosition" } }
-        capitulation: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
+        closed_loss: { type: array, items: { $ref: "#/components/schemas/WhaleEvent" } }
         winners: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
         losers: { type: array, items: { $ref: "#/components/schemas/Wallet" } }
 
+    # ---------- events / scorecard / calendar / evidence
     EventType: { type: string, enum: [price, liq, cascade, funding, whale, crowd, state] }
     Event:
       type: object
-      required: [id, ts, type, symbol, sentence]
+      required: [id, ts, type, symbol, severity, vars, sentence, replay_url]
       properties:
         id: { type: string }
-        ts: { type: integer }
+        ts: { $ref: "#/components/schemas/Ts" }
         type: { $ref: "#/components/schemas/EventType" }
-        symbol: { type: string }
+        symbol: { $ref: "#/components/schemas/Symbol" }
         severity: { type: integer, minimum: 1, maximum: 3 }
-        numbers: { type: object, additionalProperties: true }
+        vars: { type: object, additionalProperties: { $ref: "#/components/schemas/SentenceVar" }, description: the three numbers shown with the event }
         sentence: { $ref: "#/components/schemas/Sentence" }
-        replay_url: { type: string }
+        replay_url: { type: string, description: "/replay?symbol={symbol}&at={ts}" }
     EventList:
       type: object
+      required: [as_of, sources, since, until, summary, items]
       properties:
-        since: { type: integer }
-        until: { type: integer }
-        summary: { type: array, items: { $ref: "#/components/schemas/Sentence" }, maxItems: 3 }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        since: { $ref: "#/components/schemas/Ts" }
+        until: { $ref: "#/components/schemas/Ts" }
+        summary: { type: array, maxItems: 3, items: { $ref: "#/components/schemas/Sentence" } }
         items: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        next_cursor: { type: [string, "null"] }
     ScoreRow:
       type: object
+      required: [group_key, horizon, n, tag]
       properties:
-        group: { type: string, description: "e.g. state:up_healthy_pullback:4h or whale:open:long:BTC or oiq:price_up_oi_down" }
-        n: { type: integer }
+        group_key: { type: string, description: "pre-registered, e.g. state:up_pullback_shallow:4h | whale:open:long:BTC | oiq:price_up_oi_down | crowd:gt0.4" }
         horizon: { type: string, enum: [1h, 4h, 24h, 72h] }
-        median_ret: { type: number, nullable: true }
-        p25: { type: number, nullable: true }
-        p75: { type: number, nullable: true }
-        hit_rate: { type: number, nullable: true }
-        ci_low: { type: number, nullable: true }
-        ci_high: { type: number, nullable: true }
+        n: { type: integer }
+        n_effective: { type: [integer, "null"] }
+        median_ret: { $ref: "#/components/schemas/NullableNumber" }
+        p25: { $ref: "#/components/schemas/NullableNumber" }
+        p75: { $ref: "#/components/schemas/NullableNumber" }
+        hit_rate: { $ref: "#/components/schemas/NullableNumber" }
+        wilson_low: { $ref: "#/components/schemas/NullableNumber" }
+        wilson_high: { $ref: "#/components/schemas/NullableNumber" }
+        q_value: { $ref: "#/components/schemas/NullableNumber", description: BH-FDR adjusted }
         tag: { $ref: "#/components/schemas/EvidenceTag" }
     Scorecard:
       type: object
-      properties: { window: { type: string }, as_of: { type: integer }, rows: { type: array, items: { $ref: "#/components/schemas/ScoreRow" } } }
+      required: [window, as_of, rules_version, rows]
+      properties:
+        window: { type: string }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        rules_version: { type: string }
+        rows: { type: array, items: { $ref: "#/components/schemas/ScoreRow" } }
     CalendarItem:
       type: object
-      properties: { ts: { type: integer }, kind: { type: string, enum: [funding, options_expiry, macro, listing, delisting] }, title: { type: object, properties: { zh: { type: string }, en: { type: string } } }, meta: { type: object, additionalProperties: true } }
+      required: [ts, kind, title]
+      properties:
+        ts: { $ref: "#/components/schemas/Ts" }
+        kind: { type: string, enum: [funding, options_expiry, macro, listing, delisting] }
+        title: { type: object, required: [zh, en], properties: { zh: { type: string }, en: { type: string } } }
+        meta: { type: object, additionalProperties: true }
+    CalendarList:
+      type: object
+      required: [as_of, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        items: { type: array, items: { $ref: "#/components/schemas/CalendarItem" } }
+    EvidenceItem:
+      type: object
+      required: [id, claim, tag, source, n, period]
+      properties:
+        id: { type: string }
+        claim: { type: object, required: [zh, en], properties: { zh: { type: string }, en: { type: string } } }
+        tag: { $ref: "#/components/schemas/EvidenceTag" }
+        source: { type: string, description: dataset or report path }
+        n: { type: integer }
+        period: { type: string }
+        effect: { type: string }
+        method: { type: string }
+        reproduced_on_site: { type: boolean }
+    EvidenceList:
+      type: object
+      required: [as_of, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        items: { type: array, items: { $ref: "#/components/schemas/EvidenceItem" } }
+    ChangelogItem:
+      type: object
+      required: [ts, kind, summary]
+      properties:
+        ts: { $ref: "#/components/schemas/Ts" }
+        kind: { type: string, enum: [rules, templates, schema, data, ui] }
+        version: { type: string }
+        summary: { type: object, required: [zh, en], properties: { zh: { type: string }, en: { type: string } } }
+        report_url: { type: [string, "null"] }
+    ChangelogList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ChangelogItem" } }
 
-    OptionsSummary:
-      type: object
-      properties: { currency: { type: string }, as_of: { type: integer }, dvol: { type: number }, rv_30d: { type: number }, implied_daily_pct: { type: number }, pcr_oi: { type: number }, pcr_vol: { type: number }, skew_25d: { type: number }, term: { type: array, items: { type: object, properties: { expiry: { type: string }, atm_iv: { type: number }, max_pain: { type: number }, oi_usd: { type: number } } } } }
-    BasisRow:
-      type: object
-      properties: { venue: { type: string }, symbol: { type: string }, expiry: { type: string }, annualized_pct: { type: number }, perp_funding_apr_pct: { type: number, nullable: true } }
+    # ---------- macro / options / basis
     Macro:
       type: object
+      required: [as_of, sources]
       properties:
-        as_of: { type: integer }
-        fng: { type: object, properties: { value: { type: integer }, label: { type: string }, history: { type: array, items: { type: integer } } } }
-        stablecoin_supply_usd: { type: number, nullable: true }
-        stablecoin_chg_7d_pct: { type: number, nullable: true }
-        etf_flow_btc_usd: { type: number, nullable: true }
-        etf_flow_eth_usd: { type: number, nullable: true }
-        btc_dominance_pct: { type: number, nullable: true }
-        polymarket: { type: array, items: { type: object, properties: { question: { type: string }, yes_prob: { type: number }, url: { type: string } } } }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        fng: { oneOf: [ { type: object, required: [value, label, history], properties: { value: { type: integer }, label: { type: string }, history: { type: array, items: { type: integer } } } }, { type: "null" } ] }
+        stablecoin_supply_usd: { $ref: "#/components/schemas/NullableNumber" }
+        stablecoin_chg_7d_pct: { $ref: "#/components/schemas/NullableNumber" }
+        etf_flow_btc_usd: { $ref: "#/components/schemas/NullableNumber" }
+        etf_flow_eth_usd: { $ref: "#/components/schemas/NullableNumber" }
+        btc_dominance_pct: { $ref: "#/components/schemas/NullableNumber" }
+    OptionsSummary:
+      type: object
+      required: [currency, as_of]
+      properties:
+        currency: { $ref: "#/components/schemas/Currency" }
+        as_of: { $ref: "#/components/schemas/Ts" }
+        dvol: { $ref: "#/components/schemas/NullableNumber" }
+        rv_30d: { $ref: "#/components/schemas/NullableNumber" }
+        implied_daily_pct: { $ref: "#/components/schemas/NullableNumber" }
+        pcr_oi: { $ref: "#/components/schemas/NullableNumber" }
+        pcr_vol: { $ref: "#/components/schemas/NullableNumber" }
+        skew_25d: { $ref: "#/components/schemas/NullableNumber" }
+        term: { type: array, items: { type: object, required: [expiry], properties: { expiry: { type: string }, atm_iv: { $ref: "#/components/schemas/NullableNumber" }, max_pain: { $ref: "#/components/schemas/NullableNumber" }, oi_usd: { $ref: "#/components/schemas/NullableNumber" } } } }
+    BasisRow:
+      type: object
+      required: [venue, symbol, expiry, annualized_pct]
+      properties:
+        venue: { $ref: "#/components/schemas/Venue" }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        expiry: { type: string }
+        annualized_pct: { type: number }
+        perp_funding_apr_pct: { $ref: "#/components/schemas/NullableNumber" }
+    BasisList:
+      type: object
+      required: [as_of, sources, items]
+      properties:
+        as_of: { $ref: "#/components/schemas/Ts" }
+        sources: { $ref: "#/components/schemas/SourceStatus" }
+        items: { type: array, items: { $ref: "#/components/schemas/BasisRow" } }
 
+    # ---------- system
+    SourceHealth:
+      type: object
+      required: [name, status, last_ok_ts, uptime_30d]
+      properties:
+        name: { type: string }
+        status: { $ref: "#/components/schemas/SourceState" }
+        last_ok_ts: { $ref: "#/components/schemas/Ts" }
+        latency_ms: { $ref: "#/components/schemas/NullableNumber" }
+        uptime_30d: { type: number }
+        note: { type: [string, "null"] }
     Status:
       type: object
+      required: [as_of, version, coverage_coins, sources]
       properties:
-        as_of: { type: integer }
-        sources: { type: array, items: { type: object, properties: { name: { type: string }, status: { type: string, enum: [ok, stale, error] }, last_ok_ts: { type: integer }, latency_ms: { type: number }, uptime_30d: { type: number } } } }
+        as_of: { $ref: "#/components/schemas/Ts" }
         version: { type: string }
+        coverage_coins: { type: integer }
+        sources: { type: array, items: { $ref: "#/components/schemas/SourceHealth" } }
 
+    # ---------- stream
+    StreamSubscribe:
+      type: object
+      required: [op, channels]
+      properties:
+        op: { type: string, enum: [subscribe, unsubscribe] }
+        channels: { type: array, minItems: 1, maxItems: 50, items: { type: string, pattern: "^(prism|state|liq|whale|events):[A-Za-z0-9*]+$" } }
+        min_usd: { type: number, minimum: 0, description: applies to liq channels }
+    StreamMessage:
+      type: object
+      required: [ch, seq, ts, data]
+      properties:
+        ch: { type: string }
+        seq: { type: integer, description: global monotonic (Redis INCR) }
+        ts: { $ref: "#/components/schemas/Ts" }
+        data: { oneOf: [ { $ref: "#/components/schemas/PrismPatch" }, { $ref: "#/components/schemas/MarketState" }, { $ref: "#/components/schemas/LiqBatch" }, { $ref: "#/components/schemas/WhaleEvent" }, { $ref: "#/components/schemas/Event" } ] }
+    StreamError:
+      type: object
+      required: [op, code, message]
+      properties:
+        op: { type: string, enum: [error] }
+        code: { type: string }
+        message: { type: string }
+
+    # ---------- me
     Me:
       type: object
-      properties: { id: { type: string }, email: { type: string }, plan: { type: string, enum: [free, pro, team] }, lang: { type: string }, tz: { type: string }, telegram_linked: { type: boolean } }
+      required: [id, plan, lang, tz, telegram_linked, digest]
+      properties:
+        id: { type: string }
+        email: { type: [string, "null"] }
+        plan: { type: string, enum: [free, pro, team] }
+        lang: { $ref: "#/components/schemas/Locale" }
+        tz: { type: string }
+        telegram_linked: { type: boolean }
+        digest: { type: object, required: [enabled], properties: { enabled: { type: boolean }, channel: { $ref: "#/components/schemas/Channel" } } }
+        limits: { type: object, properties: { alerts: { type: integer }, api_per_min: { type: integer }, ws_subscriptions: { type: integer }, watch_wallets: { type: integer } } }
+    MeUpdate:
+      type: object
+      properties:
+        lang: { $ref: "#/components/schemas/Locale" }
+        tz: { type: string }
     MyPositionInput:
       type: object
-      required: [symbol, side, entry, lev]
-      properties: { symbol: { type: string }, side: { type: string, enum: [long, short] }, entry: { type: number }, lev: { type: number }, size_usd: { type: number, nullable: true }, stop: { type: number, nullable: true } }
+      required: [client_id, symbol, side, entry, lev, updated_ts]
+      properties:
+        client_id: { type: string, format: uuid }
+        symbol: { $ref: "#/components/schemas/Symbol" }
+        side: { $ref: "#/components/schemas/Side" }
+        entry: { type: number, exclusiveMinimum: 0 }
+        lev: { type: number, minimum: 1, maximum: 200 }
+        venue: { oneOf: [ { $ref: "#/components/schemas/Venue" }, { type: "null" } ] }
+        size_usd: { $ref: "#/components/schemas/NullableNumber" }
+        stop: { $ref: "#/components/schemas/NullableNumber" }
+        opened_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        updated_ts: { $ref: "#/components/schemas/Ts" }
     MyPosition:
       allOf:
         - $ref: "#/components/schemas/MyPositionInput"
         - type: object
-          properties: { id: { type: string }, created_ts: { type: integer } }
+          required: [id, created_ts]
+          properties:
+            id: { type: string }
+            created_ts: { $ref: "#/components/schemas/Ts" }
+    MyPositionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MyPosition" } }
     WatchItem:
       type: object
       required: [kind, key]
-      properties: { kind: { type: string, enum: [coin, wallet] }, key: { type: string } }
+      properties:
+        kind: { type: string, enum: [coin, wallet] }
+        key: { type: string }
     Watchlist:
       type: object
-      properties: { items: { type: array, items: { $ref: "#/components/schemas/WatchItem" } } }
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/WatchItem" } }
     AlertScope: { type: string, enum: [position, coin, wallet, market] }
     AlertMetric:
       type: string
       enum: [funding_8h, funding_spread, oi_chg_pct, liq_1h_usd, cascade, whale_event, whale_near_liq, gap_pts, crowding, price, state_change, liq_distance_pct]
     AlertRuleInput:
       type: object
-      required: [scope, metric, op, value, channels]
+      required: [scope, metric, op, channels]
       properties:
         scope: { $ref: "#/components/schemas/AlertScope" }
-        target: { type: string, nullable: true, description: symbol / address / position id }
+        target: { type: [string, "null"], description: symbol / address / position client_id }
         metric: { $ref: "#/components/schemas/AlertMetric" }
         op: { type: string, enum: [gt, lt, crosses_up, crosses_down, eq] }
-        value: { type: number, nullable: true }
-        window: { type: string, nullable: true }
-        cooldown_s: { type: integer, default: 3600 }
-        channels: { type: array, items: { type: string, enum: [telegram, email, push, webhook] } }
-        template_id: { type: string, nullable: true }
+        value: { $ref: "#/components/schemas/NullableNumber" }
+        window: { type: [string, "null"] }
+        cooldown_s: { type: integer, minimum: 60, default: 3600 }
+        channels: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Channel" } }
+        template_id: { type: [string, "null"] }
         enabled: { type: boolean, default: true }
     AlertRule:
       allOf:
         - $ref: "#/components/schemas/AlertRuleInput"
         - type: object
-          properties: { id: { type: string }, created_ts: { type: integer }, last_fired_ts: { type: integer, nullable: true } }
+          required: [id, created_ts]
+          properties:
+            id: { type: string }
+            created_ts: { $ref: "#/components/schemas/Ts" }
+            last_fired_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+            paused: { type: boolean }
+    AlertRuleList:
+      type: object
+      required: [items, limit]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AlertRule" } }
+        limit: { type: integer }
     AlertDelivery:
       type: object
-      properties: { id: { type: string }, rule_id: { type: string }, ts: { type: integer }, channel: { type: string }, status: { type: string, enum: [sent, failed, retrying] }, preview: { type: string } }
+      required: [id, rule_id, ts, channel, status]
+      properties:
+        id: { type: string }
+        rule_id: { type: string }
+        ts: { $ref: "#/components/schemas/Ts" }
+        channel: { $ref: "#/components/schemas/Channel" }
+        status: { type: string, enum: [sent, failed, retrying] }
+        preview: { type: string }
+    AlertDeliveryList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/AlertDelivery" } }
+        next_cursor: { type: [string, "null"] }
+    PushSubscriptionInput:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint: { type: string, format: uri }
+        keys: { type: object, required: [p256dh, auth], properties: { p256dh: { type: string }, auth: { type: string } } }
+        ua: { type: string, maxLength: 256 }
+    PushSubscription:
+      allOf:
+        - $ref: "#/components/schemas/PushSubscriptionInput"
+        - type: object
+          required: [id, created_ts]
+          properties:
+            id: { type: string }
+            created_ts: { $ref: "#/components/schemas/Ts" }
+    PushSubscriptionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PushSubscription" } }
     ApiKey:
       type: object
-      properties: { id: { type: string }, prefix: { type: string }, created_ts: { type: integer }, last_used_ts: { type: integer, nullable: true }, calls_30d: { type: integer } }
+      required: [id, prefix, created_ts, calls_30d]
+      properties:
+        id: { type: string }
+        label: { type: [string, "null"] }
+        prefix: { type: string }
+        created_ts: { $ref: "#/components/schemas/Ts" }
+        last_used_ts: { oneOf: [ { $ref: "#/components/schemas/Ts" }, { type: "null" } ] }
+        calls_30d: { type: integer }
+    ApiKeyList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
     ApiKeyCreated:
       allOf:
         - $ref: "#/components/schemas/ApiKey"
         - type: object
-          properties: { key: { type: string, description: shown once } }
+          required: [key]
+          properties:
+            key: { type: string, description: shown once }
+
+    # ---------- static snapshot layer (GitHub Pages, v0.1 field names; migrates to Prism names in S1)
+    SnapshotFile:
+      type: object
+      description: data/latest.json produced by scripts/fetch.py. Independent schema, not a Prism subset.
+      required: [schema, generated_at, sources, coins, whales]
+      properties:
+        schema: { type: integer }
+        generated_at: { $ref: "#/components/schemas/Ts" }
+        generated_iso: { type: string }
+        sources: { type: object, additionalProperties: { type: string } }
+        coins: { type: array, items: { type: object, additionalProperties: true } }
+        macro: { type: object, additionalProperties: true }
+        whales: { type: object, additionalProperties: true }

@@ -25,8 +25,7 @@ DATA.mkdir(exist_ok=True)
 
 COINS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB", "SUI"]
 
-# www.binance.com mirrors the futures API and is reachable from US IPs (GitHub runners),
-# where fapi.binance.com answers 451. Try the mirror first, then the canonical host.
+# Binance futures API hosts, tried in order; each source degrades independently when a host is unavailable.
 BINANCE_BASES = ["https://www.binance.com", "https://fapi.binance.com"]
 
 HL_INFO = "https://api.hyperliquid.xyz/info"
