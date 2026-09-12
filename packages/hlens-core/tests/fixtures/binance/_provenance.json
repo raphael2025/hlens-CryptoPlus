@@ -1,0 +1,18 @@
+{
+ "recorded_at_ms": 1789196928383,
+ "egress": {"ip": "196.188.33.208", "asn": "AS24757", "country": "ET"},
+ "note": "Responses are trimmed to BTCUSDT/ETHUSDT/SOLUSDT/1000PEPEUSDT plus one non-TRADING symbol. Re-record with scripts in the task log; total cost was 56 weight of a 2400/min ceiling.",
+ "rest": {
+  "source": "recorded",
+  "base": "https://fapi.binance.com",
+  "files": ["exchangeInfo", "fundingInfo", "premiumIndex", "openInterest_BTCUSDT",
+            "ticker24hr", "klines_BTCUSDT_1h", "globalLongShortAccountRatio",
+            "topLongShortAccountRatio", "topLongShortPositionRatio",
+            "takerlongshortRatio", "time"]
+ },
+ "ws": {
+  "source": "documented",
+  "files": ["ws_markPrice", "ws_forceOrder"],
+  "why": "wss://fstream.binance.com accepts the connection and ACKs SUBSCRIBE from this egress (196.188.x / AS24757 / ET) but delivers zero market-data frames; verified against /stream?streams=, /ws/<stream> and the SUBSCRIBE method, and against btcusdt@aggTrade. Hyperliquid, OKX, Gate and Bybit WS all stream normally from the same host, so it is Binance-specific, not a local network problem. Payload shapes are the documented ones with values taken from the REST fixtures recorded in the same minute. Re-record on the Tokyo egress in S0 and flip this to \"recorded\"."
+ }
+}

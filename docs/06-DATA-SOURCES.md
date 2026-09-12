@@ -104,7 +104,7 @@
 |---|---|---|---|---|---|
 | `/fapi/v1/premiumIndex` | 不传 symbol = 全市场 | `markPrice, indexPrice, lastFundingRate, nextFundingTime` | 1 单币 / **10 全市场** | 快照 | REST 60 s 兜底；主用 WS |
 | `/fapi/v1/openInterest` | `symbol` 必填 | `openInterest` | 1 | 快照 | 逐币 1 min（300 币 = 300 W/min） |
-| `/futures/data/openInterestHist` | `symbol, period(5m…1d), limit≤500` | `sumOpenInterestValue` | 0（仍受 IP 频率限制） | 500 / **30 天** | 冷启动一次 |
+| `/futures/data/openInterestHist` | `symbol, period(5m…1d), limit≤500` | `sumOpenInterestValue` | 0（实测响应无 `X-MBX-USED-WEIGHT` 头，仍受 IP 频率限制；账本按 1 记） | 500 / **30 天** | 冷启动一次 |
 | `/futures/data/globalLongShortAccountRatio` | 同上 | `longAccount` | 0 | 500 / 30 天 | 5 min |
 | `/futures/data/topLongShortAccountRatio` | 同上 | `longAccount` | 0 | 500 / 30 天 | 5 min |
 | `/futures/data/topLongShortPositionRatio` | 同上 | `longAccount` | 0 | 500 / 30 天 | 5 min |
@@ -115,7 +115,7 @@
 | `/fapi/v1/klines` | `symbol, interval, limit≤1500` | OHLCV + `takerBuyBaseVolume` | limit<100→1，<500→2，≤1000→5，>1000→10 | 1500 / 全史 | 收盘补齐；批量走 data.binance.vision |
 | `/fapi/v1/markPriceKlines` | 同上 | 标记价 OHLC | 同上 | 1500 | 断线补齐 |
 | `/fapi/v1/ticker/24hr` | 不传 symbol = 全市场 | `priceChangePercent, quoteVolume` | 1 单币 / **40 全市场** | 快照 | 1 min 全市场 |
-| `/fapi/v1/exchangeInfo` | – | `symbols[].filters, contractType, status` | 1 | – | 1 h |
+| `/fapi/v1/exchangeInfo` | – | `symbols[].filters, contractType, status` | 1 | – | 1 h；`contractType` 现有 `TRADIFI_PERPETUAL`（美股类永续），默认只取 `PERPETUAL` |
 | `/fapi/v1/leverageBracket` | **需签名（USER_DATA）** | `brackets[].maintMarginRatio` | 1 | – | **不采**；MMR 用 Bybit `risk-limit` 近似 |
 
 WebSocket `wss://fstream.binance.com/stream?streams=`：`!markPrice@arr@1s`（全市场标记价 + 费率，1 s）、`!forceOrder@arr`（爆仓，**每符号每秒只推最大一笔**，是下界，`throttled_source=true`）、`<symbol>@kline_1m`（前 50 币）、`!ticker@arr`（1 s，可替代 24hr REST）。连接规则：每连接 ≤ 1024 流；每 IP 每 5 min ≤ 300 次连接；24 h 强制断开（要主动轮换）；服务端每 3 min ping，10 min 内须 pong；入站 ≤ 5 条/s。
@@ -283,7 +283,7 @@ HL 是唯一紧的来源，而且**官方 WS 限制每 IP 只能订阅 10 个不
 | `api.hyperliquid.xyz`、`stats-data.hyperliquid.xyz` | 200 | 200 | 200 | S0 |
 | CoinGecko、DefiLlama、alternative.me、Deribit | 200 | 200 | – | S0 |
 
-结论：本机可以完整开发和测试全部适配器，不需要云端跑测试；Actions 只能做快照兜底；东京、新加坡待 S0 核实（同时确认东京出口不在 hub 的 `exit_ip_budget` 表里）。
+结论：本机可以完整开发和测试全部适配器的 **REST** 部分，不需要云端跑测试。**例外：Binance WS 从本机出口连得上、订阅有 ACK、但不推任何数据**（2026-09-12 实测，`/stream`、`/ws/<stream>`、SUBSCRIBE 三种方式都一样；同一分钟 HL、OKX、Gate、Bybit 的 WS 正常），Binance WS 的 fixtures 标 `source: documented`，要在东京出口重录。另：本机时钟比五所快约 1.35 s，超过 §6-5 的 1 s 门槛，是 WSL 的问题，东京要开 chrony。Actions 只能做快照兜底；东京、新加坡待 S0 核实（同时确认东京出口不在 hub 的 `exit_ip_budget` 表里）。
 
 ## 6. 采集器自检（preflight）要测什么
 
