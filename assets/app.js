@@ -32,6 +32,7 @@
       "foot.disclaimer": "hlens is a free research tool. Nothing here is investment advice. Perpetual futures with leverage can lose more than your deposit. Data comes from public exchange APIs and can be delayed or wrong; verify before acting.",
       "foot.sources": "Sources: Binance USDⓈ-M, OKX swap, Gate and Bitget USDT futures, Bybit linear, Hyperliquid info API and leaderboard, alternative.me.",
       "foot.refresh": "Refreshed every {n} min by GitHub Actions.",
+      "foot.nav.terms": "Terms", "foot.nav.privacy": "Privacy", "foot.nav.disclaimer": "Disclaimer", "foot.nav.sources": "Data sources",
       // dynamic
       "f.retail": "Retail long share", "f.retail.s": "accounts net long · 5 venues avg",
       "f.top": "Top-trader long share", "f.top.s": "Binance + Gate top accounts",
@@ -87,6 +88,7 @@
       "foot.disclaimer": "hlens 是免费研究工具，不构成任何投资建议。带杠杆的永续合约可能亏损超过本金。数据来自交易所公开接口，可能延迟或出错，行动前请自行核实。",
       "foot.sources": "数据源：Binance U 本位、OKX 永续、Gate 与 Bitget U 本位、Bybit 线性、Hyperliquid info 接口与排行榜、alternative.me。",
       "foot.refresh": "由 GitHub Actions 每 {n} 分钟刷新。",
+      "foot.nav.terms": "服务条款", "foot.nav.privacy": "隐私政策", "foot.nav.disclaimer": "免责声明", "foot.nav.sources": "数据来源",
       "f.retail": "散户多头占比", "f.retail.s": "净多账户占比 · 五所均值",
       "f.top": "大账户多头占比", "f.top.s": "Binance + Gate 大账户",
       "f.taker": "主动买入占比", "f.taker.s": "主动买量 ÷ 总量 · 1 小时",

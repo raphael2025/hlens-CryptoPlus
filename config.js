@@ -11,6 +11,10 @@ window.HLENS_CONFIG = {
     discord: "",    // e.g. "https://discord.gg/xxxx"
     x: ""           // e.g. "https://x.com/your_handle"
   },
+  // Contact address used on terms/privacy/disclaimer/sources for legal
+  // questions and Hyperliquid-address removal requests.
+  // TODO: replace with your real support/removal-request address.
+  supportEmail: "support@example.com",
   // Data files produced by scripts/fetch.py (relative to index.html)
   dataBase: "data/",
   // Refresh cadence shown in the footer (keep in sync with the workflow cron)
