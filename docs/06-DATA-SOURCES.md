@@ -219,7 +219,7 @@ WebSocket：当前公开地址 **`wss://ws.bitget.com/v2/ws/public`**（`hlens` 
 | `l2Book`、`recentTrades`、`liquidatable` | – | – | 2 / 每 20 条 / **实测 ≈ 16，记 20** | – | 不采；`liquidatable` 与 `recentTrades` 官方页面未列，**未验证** |
 | `portfolio`、`userRateLimit`、`perpsAtOpenInterestCap` | `user` | – | 20 | – | 按需 |
 
-fill 对象：`coin, px, sz, side, time, startPosition, dir, closedPnl, hash, oid, crossed, fee, feeToken, tid, builderFee?, liquidation{liquidatedUser, markPx, method}?`。陷阱：`tid` 不唯一（hub 实测 207,635 条 `tid=0`）；`"liquidation": null` 键存在。
+fill 对象（2026-09-12 实测）：`cloid, closedPnl, coin, crossed, dir, fee, feeToken, hash, oid, px, side, startPosition, sz, tid, time, twapId`，另有 `liquidation{liquidatedUser, markPx, method}`（6000 条中 21 条带）、`builderFee`（偶现）。约 28% 的成交 `hash` 为全零，不是爆仓标记。`clearinghouseState.assetPositions[].position` 键：`coin, cumFunding, entryPx, leverage, liquidationPx, marginUsed, maxLeverage, positionValue, returnOnEquity, szi, unrealizedPnl`。陷阱：`tid` 不唯一（hub 实测 207,635 条 `tid=0`）；`"liquidation": null` 键存在。
 
 排行榜 `GET https://stats-data.hyperliquid.xyz/Mainnet/leaderboard`：官方前端同源、**无文档**、CloudFront 静态 JSON、不吃 `/info` 权重；`leaderboardRows[]{ethAddress, accountValue, windowPerformances[[day|week|month|allTime, {pnl, roi, vlm}]]}`。`accountValue` 含现货，不可作永续分层依据。
 
@@ -303,8 +303,8 @@ HL 是唯一紧的来源，而且**官方 WS 限制每 IP 只能订阅 10 个不
 
 | # | 问题 | 处置 |
 |---|---|---|
-| 1 | HL WS 每 IP 10 个 user 的限制与"hot 200 订阅"冲突 | §4 的 `trades{coin}` 方案，S0 验证 `users` 字段后改 `03` §4.1 |
-| 2 | HL `userFills` 2000 条 / 保留 10,000 条、`candleSnapshot` 5000 条、`liquidatable` 与 `recentTrades` 均非官方原文 | 记账按上界；`liquidatable` 不用 |
+| 1 | HL WS 每 IP 10 个 user 的限制与"hot 200 订阅"冲突 | **已验证（`docs/reports/2026-09-12-hl-ws-trades.md`）**：`trades{coin}` 每条带 `users:[buyer,seller]`，与 `userFillsByTime` 的 `tid`/`hash` 逐条一致；35 币约 250 msg/min，远低于 2000/min。但它不带 `dir/closedPnl/fee/startPosition/oid/liquidation`，且只覆盖已订阅币。定案：`trades` 发现 + 每分钟 `clearinghouseState` 对账 + 仓位有变才拉 `userFillsByTime` 补全字段；`userFills` WS 只给 ≤ 8 个关注度最高的钱包。`03` §4.1 待改 |
+| 2 | HL `userFillsByTime` 单次 2000 条上限**已实测**（5 个高频地址 24h 窗口全部截断）；保留 10,000 条、`candleSnapshot` 5000 条、`liquidatable` 与 `recentTrades` 仍非官方原文 | 高频钱包窗口要小于 24h；记账按上界；`liquidatable` 不用 |
 | 3 | Binance `leverageBracket` 需签名 | MMR 用 Bybit `risk-limit` + OKX `position-tiers` + Gate `risk_limit_tiers`，Binance 档位近似 Bybit，输出标 `model_estimated` |
 | 4 | Binance 多空比只保留 30 天 | 30 天分位冷启动够用；更长历史靠 `data.binance.vision/metrics` 打包 + 自采累积 |
 | 5 | Bybit 全域 403（美国出口） | 采集只在非美出口；Actions 快照不含 Bybit |
