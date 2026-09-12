@@ -56,7 +56,7 @@
 ### 2.5 爆仓
 | 数据 | 用途 | 表 | 首选 | 备选 |
 |---|---|---|---|---|
-| 逐笔爆仓流 | `liq_1h_usd`、`liq_24h_*`、级联检测、关键位密度 | `liquidations` | Binance WS `!forceOrder@arr`（**限流：每符号每秒最多 1 条**，是下界）；Bybit WS `allLiquidation.SYMBOL`；OKX WS `liquidation-orders`；Bitget WS；HL WS `trades` 中带 `liquidation` 的成交 + `userFills.liquidation` | Gate `/liq_orders` 轮询（15 min） |
+| 逐笔爆仓流 | `liq_1h_usd`、`liq_24h_*`、级联检测、关键位密度 | `liquidations` | Binance WS `!forceOrder@arr`（**限流：每符号每秒最多 1 条**，是下界）；Bybit WS `allLiquidation.SYMBOL`；OKX WS `liquidation-orders`；Bitget WS；HL：`trades{coin}` **不带** `liquidation` 字段（实测，`reports/2026-09-12-hl-ws-trades.md`），逐笔强平只在 fill 对象上（`userFills` / `userFillsByTime` 的 `liquidation{liquidatedUser,markPx,method}`），逐钱包采样是 `lower_bound`（hub 实测见 `reports/2026-09-12-hl-liquidation-coverage.md`）；**全所级唯一真值源是节点数据 `hl-mainnet-node-data/node_fills_by_block`**（存档月更；实时需自跑非验证节点） | Gate `/liq_orders` 轮询（15 min） |
 | 爆仓聚合（小时） | 冷启动、对账 | `liquidations` | Gate `contract_stats.long_liq_usd/short_liq_usd`（1h，唯一给聚合 USD 的公开端点） | OKX `/public/liquidation-orders` 历史 |
 
 ### 2.6 合约元数据

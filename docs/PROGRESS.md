@@ -11,7 +11,8 @@
 | S0-3 | 法律与来源页：`/terms` `/privacy` `/disclaimer` `/sources`，中英 | frontend-dev / Sonnet | 完成 | 09-12 | 已上线静态站；`config.js` 的 `supportEmail` 是占位，待 raphael 填 |
 | S0-4a | Bybit、OKX 适配器 | Cursor CLI / auto | 进行中 | 09-12 | 独立 worktree，分支 S0-4a |
 | S0-4b | Gate、Bitget 适配器 | Cursor CLI / auto | 进行中 | 09-12 | 独立 worktree，分支 S0-4b |
-| S0-4c | Hyperliquid 适配器（含钱包方法） | backend-dev / Opus | 待办 | – | 等 4a/4b 合并后做，避免基类冲突 |
+| S0-4c | Hyperliquid 适配器（含钱包方法） | backend-dev / Opus | 待办 | 09-12 | **提为最高优先**（决定记录 09-12）；若 4a/4b 未合并即开工，基类冲突用 rebase 处理；`liquidation_*` 能力先按 `lower_bound` 声明，`full` 等 S0-11 |
+| S0-11 | HL 节点数据验证：拉一天 `node_fills_by_block` 存档与 hub `hl.liquidation` 逐笔比对，得出实测完整度与按币缺口 | data-engineer / Sonnet | 待办 | 09-12 | 报告 §8 第 0 条；任何"完整度"对外声明的前提；通过后再评估月度存档回填与自跑节点 |
 | S0-5 | `config/venues.yaml`（从 06 抄常数） | backend-dev | 完成 | 09-12 | 随 S0-1 产出，含 source 标签与 budget ≤ limit 校验 |
 | S0-6 | hub 只读导出 + 试导一天数据 | backend-dev | 阻塞 | – | 需东京 DB；先用本机 Postgres 试 |
 | S0-7 | 两台 VPS 规格、出口 IP、Docker 版本 | raphael | 阻塞 | – | 等信息或登录授权 |
@@ -25,9 +26,11 @@
 |---|---|
 | 09-11 | 文档 00–05、OpenAPI 1.1.0、三轮审查 |
 | 09-12 | 06 数据源文档；币种分层决定（核心 5 + 浅层 200）；架构边界定稿（hub 管历史普查，东京管实时与计算，浏览器管个人视图） |
+| 09-12 | hub `hl.liquidation` 覆盖率 / 延迟 / 采集能力测量（`reports/2026-09-12-hl-liquidation-coverage.md`）；修正 00 §6 与 06 §2.5 对 HL 强平来源的描述 |
 
 ## 决定记录
 
 - 09-12 不用 ccxt，自写适配器（06 §2、adapter 研究）。
 - 09-12 hub 不重构、不容器化；只加只读导出、备份、安全修复。
 - 09-12 hot 钱包实时成交定案：WS `trades{coin}`（带买卖双方地址）发现 + 每分钟 `clearinghouseState` 对账 + 仓位变化才拉 `userFillsByTime` 补字段；`userFills` WS 只留给 ≤ 8 个钱包。S0-2 实测通过。`03-DEVELOPMENT` §4.1 在 S0-4 时一并改。
+- 09-12 **优先做 Hyperliquid**。理由：HL 是唯一能拿到账本级真值的所（节点数据），也是唯一能把多空/拥挤度按公开公式自算、而不是转述交易所黑盒数字的所。顺序：HL 适配器（S0-4c）→ 节点数据验证（S0-11）→ 节点强平链路。CEX 的费率/OI/K 线是精确数据，按原计划；CEX 强平流一律 `lower_bound` 事件流，不做总量、不与 HL 并排比总额。hub 的 `hl.liquidation` 只能做"大户强平事件流"，展示窗口须晚于 P95 延迟（约 33 h）。分工不变：钱包级留 hub 轮询路径，全所级走节点数据。
