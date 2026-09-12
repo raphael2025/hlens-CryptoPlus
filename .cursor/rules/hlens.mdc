@@ -1,0 +1,5 @@
+---
+description: hlens-CryptoPlus repo rules
+alwaysApply: true
+---
+Read and obey /AGENTS.md before any change. Take a task id from docs/PROGRESS.md; work on a branch feat/<task-id>-<slug>; never commit to main; never touch index.html, assets/, scripts/fetch.py, .github/workflows/, data/, config.js unless the task names them.
