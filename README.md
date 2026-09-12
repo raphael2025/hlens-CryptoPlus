@@ -34,7 +34,7 @@ Edit `config.js` to set community links (Telegram / Discord / X) and the GitHub 
 | `data/latest.json` | full snapshot: `coins[]` (prism facets + per-exchange rows), `whales` (wallets, by_coin, top_positions), `macro`, `sources` |
 | `data/history.json` | last 7 days of `[price, funding_8h, oi_total_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
 
-The static snapshot (`data/latest.json`) is an independent v0.1 schema (`SnapshotFile` in the contract); from stage S1 it migrates to the production `Prism` field names. The project is documented as a four-part set: [docs/00-PROJECT.md](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [docs/01-FEATURES.md](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [docs/02-API.md](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [docs/03-DEVELOPMENT.md](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment), [docs/04-ARCHITECTURE-REVIEW.md](docs/04-ARCHITECTURE-REVIEW.md) (what is reused from raphael's existing repos and what is not touched), [docs/05-DOCKER.md](docs/05-DOCKER.md) (container layout for the two VPS). Older drafts live in `docs/archive/`; review records in `docs/reviews/`.
+The static snapshot (`data/latest.json`) is an independent v0.1 schema (`SnapshotFile` in the contract); from stage S1 it migrates to the production `Prism` field names. The project is documented as a core set from `docs/00-PROJECT.md` through `docs/06-DATA-SOURCES.md`: [00-PROJECT](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [01-FEATURES](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [02-API](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [03-DEVELOPMENT](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment), [04-ARCHITECTURE-REVIEW](docs/04-ARCHITECTURE-REVIEW.md) (what is reused from raphael's existing repos and what is not touched), [05-DOCKER](docs/05-DOCKER.md) (container layout for the two VPS), and [06-DATA-SOURCES](docs/06-DATA-SOURCES.md) (data requirements, sources, reachability, and budgets). The adapter research is in [docs/adapter/](docs/adapter/). Older drafts live in `docs/archive/`; review records in `docs/reviews/`.
 
 ## Sources
 
@@ -50,6 +50,6 @@ hlens is a research tool. Nothing here is investment advice. Leveraged perpetual
 
 **一个币，所有角度。** hlens 把一个合约市场分解成里面的人：散户、大账户、链上大户，横跨 Binance、Bybit、OKX 和 Hyperliquid。三方意见相左，就是信号。
 
-免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。项目、功能、契约与开发文档见 `docs/00-PROJECT.md` 起的四份文件。
+免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。项目、功能、契约、数据源与开发文档见 [`docs/00-PROJECT.md`](docs/00-PROJECT.md) 至 [`docs/06-DATA-SOURCES.md`](docs/06-DATA-SOURCES.md)；适配器研究见 [`docs/adapter/ADAPTER-RESEARCH.md`](docs/adapter/ADAPTER-RESEARCH.md)。
 
 本站是研究工具，不构成投资建议。带杠杆的永续合约可能亏损超过本金。
