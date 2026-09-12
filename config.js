@@ -7,7 +7,7 @@ window.HLENS_CONFIG = {
   github: "https://github.com/raphael2025/hlens-CryptoPlus",
   // Public community entry points. Fill in the ones you use.
   community: {
-    telegram: "",   // e.g. "https://t.me/your_group"
+    telegram: "https://t.me/+E3UdPtwlISVhZDc1",   // HLENS CryptoPlus 中文社区
     discord: "",    // e.g. "https://discord.gg/xxxx"
     x: ""           // e.g. "https://x.com/your_handle"
   },

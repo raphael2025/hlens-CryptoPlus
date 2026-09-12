@@ -14,7 +14,7 @@
 | S0-6 | hub 只读导出 + 试导一天数据 | backend-dev | 阻塞 | – | 需东京 DB；先用本机 Postgres 试 |
 | S0-7 | 两台 VPS 规格、出口 IP、Docker 版本 | raphael | 阻塞 | – | 等信息或登录授权 |
 | S0-8 | hub 安全修复（Tailscale 密钥轮换、admin 绑 127.0.0.1） | raphael | 阻塞 | – | |
-| S0-9 | 域名、Telegram 频道名、CoinGecko Demo key | raphael | 阻塞 | – | |
+| S0-9 | 域名、Telegram 群、CoinGecko Demo key | raphael | 进行中 | 09-12 | TG 群已给并配置进 `config.js`（HLENS CryptoPlus 中文社区）；域名与 CoinGecko key 待给 |
 | S0-10 | 代码审查 S0-1、S0-4 | reviewer / Opus | 待办 | – | |
 
 ## 已完成
