@@ -1,0 +1,132 @@
+# config/egress-consumers.yaml — who else spends this public egress IP's budget.
+#
+# MAINTAINED BY HAND (raphael). docs/03-ARCHITECTURE.md §6.1: the production
+# host shares one public egress IP with an older collector, the exchanges meter
+# per IP, and the two consumers cannot see each other's usage. So the split is
+# static: this file says how much of each bucket is reserved for someone else,
+# the ledger's ceiling is `official × share − Σ reserved`, and preflight prints
+# the whole deduction at startup and refuses to start if this file is missing
+# or disagrees with the consumers actually running.
+#
+# Every change to this table must leave a row in `ops_event` (§6.1).
+#
+# Three rules the loader enforces, so that this file cannot lie by omission:
+#   1. every consumer must have an entry for EVERY venue in venues.yaml, and
+#      every entry must cover EVERY bucket of that venue. A missing venue or
+#      bucket is a load error, never an implicit zero.
+#   2. `reserved_per_min: 0` must carry an `assertion:` saying why it is zero
+#      and a `checked_by:` saying who re-checks it. §6.1: "「旧采集器不碰
+#      Binance」必须被断言，不能靠记忆". A zero here is a claim about the world,
+#      not a default.
+#   3. every number carries a source tag (official | measured | unverified |
+#      derived), same vocabulary as config/venues.yaml.
+#
+# The failure mode this file exists to prevent, in §6.1's own words: "它对不上
+# 现实时，错的方式是「我们以为有 960 权重其实没有」".
+
+schema: 1
+
+consumers:
+
+  # ------------------------------------------------------------------ #
+  # The older Hyperliquid collector, still running on the production host.
+  # It is not ours, it will be retired, and until then it spends first.
+  # ------------------------------------------------------------------ #
+  - name: hub_legacy
+    role: >-
+      The pre-existing Hyperliquid wallet/market collector on the production
+      host. Not part of this project; retires during M5 (03 §15).
+    venues:
+
+      binance:
+        fapi_weight:
+          reserved_per_min: 0
+          source: unverified
+          # This zero is the assertion §6.1 demands. It is NOT "we left it
+          # blank": if the legacy collector ever starts calling Binance, our
+          # 960/min ceiling is wrong by however much it takes, and the first
+          # symptom is a 429 that escalates to a 418 banning the whole host.
+          assertion: >-
+            hub_legacy collects Hyperliquid only and never calls Binance
+            (03 §6.1 表第 1 行).
+          checked_by: preflight_each_start
+          doc: "03 §6.1 表第 1 行「旧采集器只采 Hyperliquid，不碰 Binance」"
+        futures_data:
+          reserved_per_min: 0
+          source: unverified
+          assertion: >-
+            hub_legacy collects Hyperliquid only and never calls
+            /futures/data/* (03 §6.1 表第 2 行).
+          checked_by: preflight_each_start
+          doc: "03 §6.1 表第 2 行：留给 hub 旧采集器 0"
+
+      hyperliquid:
+        info_weight:
+          # 960, not 1080: 960 + 120 = 1080 = the 90 % egress ceiling, which
+          # leaves 120 weight/min of backoff headroom for the WHOLE egress IP.
+          # Writing 1080 + 120 = 1200 would push the egress to 100 % of the
+          # official limit — that is the 429 -> 418 path (03 §20, review fix 1).
+          #
+          # It is a conservative PLACEHOLDER, not a measurement. The claim that
+          # "hub already spends nearly 100 % of the HL budget" turned out to be
+          # a circular reference with no source (03 §6.1). Until M1-B measures
+          # it, we assume the legacy collector may be using almost all of it.
+          reserved_per_min: 960
+          source: unverified
+          note: >-
+            Conservative placeholder. M1-B replaces it with a measured value,
+            read from the legacy collector's OWN ledger and logs — never by
+            probing the exchange, which would spend the budget we are trying to
+            protect (03 §6.1). Then re-run preflight; M5's gating conclusion is
+            recomputed from the new number.
+          doc: "03 §6.1 表第 3 行 + §20 评审修正第 1 行"
+        # Seats, unlike weight, are indivisible and zero-sum (04 §4). How many
+        # the legacy collector holds is unknown; §6.1 row 4 says "上机第一件事
+        # 就是数". `null` means exactly that: unknown, not zero. The ledger
+        # refuses to pretend it can subtract an unknown and flags the bucket.
+        ws_seats:
+          connections:
+            reserved: null
+            source: unverified
+            doc: "03 §6.1 表第 4 行：旧采集器已占的连接数未验证"
+          distinct_users:
+            reserved: null
+            source: unverified
+            doc: "03 §6.1 表第 4 行：user 席位是零和的，M5 上线前必须对账"
+
+  # ------------------------------------------------------------------ #
+  # The development machine. Same egress as production (03 §8).
+  # ------------------------------------------------------------------ #
+  - name: dev_machine
+    role: >-
+      raphael's development machine. It leaves this egress through the same
+      public IP as production, so it is a consumer whether or not it is
+      collecting (03 §8).
+    venues:
+
+      binance:
+        fapi_weight:
+          reserved_per_min: 0
+          source: derived
+          assertion: >-
+            dev's live budget is 0 (03 §6.1 last bullet: "dev 的 live 预算为
+            0"). Offline tests use recorded fixtures; live tests are marked
+            @pytest.mark.live and skipped by default (AGENTS §2).
+          checked_by: pytest_addopts_not_live
+          doc: "03 §6.1 最后一条 + 03 §8"
+        futures_data:
+          reserved_per_min: 0
+          source: derived
+          assertion: >-
+            dev's live budget is 0; see above.
+          checked_by: pytest_addopts_not_live
+          doc: "03 §6.1 最后一条"
+
+      hyperliquid:
+        info_weight:
+          reserved_per_min: 0
+          source: derived
+          assertion: >-
+            dev's live budget is 0; see above.
+          checked_by: pytest_addopts_not_live
+          doc: "03 §6.1 最后一条"

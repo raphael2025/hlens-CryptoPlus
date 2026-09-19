@@ -2,8 +2,9 @@
 # the rate-limit ledger, the preflight CLI, the venue adapters and the wallet
 # protocol. See docs/03-ARCHITECTURE.md §4.
 #
-# M1-A1 populates `contracts` only. The other module subpackages are created by
-# the step that owns them; there are deliberately no stub packages here.
+# M1-A1 populates `contracts`; M1-A2 adds `ratelimit`. The remaining module
+# subpackages are created by the step that owns them; there are deliberately no
+# stub packages here.
 
 [build-system]
 requires = ["hatchling==1.32.3"]
@@ -15,7 +16,9 @@ version = "0.1.0"
 description = "Normalized data contracts shared by every hlens CryptoPlus module (seam ①)"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["pydantic==2.13.5"]
+# pyyaml: the ledger reads config/venues.yaml and config/egress-consumers.yaml
+# (03 §6.1). Version from the §3 lock table, constrained in the workspace root.
+dependencies = ["pydantic==2.13.5", "pyyaml==6.0.3"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hlens_core"]

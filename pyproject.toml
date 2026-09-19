@@ -35,6 +35,7 @@ constraint-dependencies = [
   "websockets==17.1",
   "pydantic==2.13.5",
   "pyyaml==6.0.3",
+  "types-pyyaml==6.0.12.20260906",
   "psycopg==3.3.6",
   "psycopg-pool==3.3.2",
 ]
@@ -52,6 +53,10 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "respx==0.23.1",
+  # Stub-only distribution for PyYAML, which ships no type information. Needed
+  # because §3 runs mypy in strict mode and the ledger parses the two YAML
+  # config files. Not in §3's lock table — see the PR's "Doc corrections".
+  "types-pyyaml==6.0.12.20260906",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -114,6 +119,21 @@ ban-relative-imports = "parents"
 "hlens_collector.compute".msg = "seam ③: import it through a table or a contract, not directly"
 "hlens_collector.liquidation".msg = "seam ③: import it through a table or a contract, not directly"
 "hlens_collector.export".msg = "seam ③: import it through a table or a contract, not directly"
+
+[tool.ruff.lint.per-file-ignores]
+# TID251 bans a module's dotted path so that another module cannot import it.
+# It cannot tell "someone else is importing ratelimit" from "ratelimit is
+# importing its own submodule": ruff resolves `from .config import ...` to
+# `hlens_core.ratelimit.config`, which matches the ban. An intra-module import
+# is not an edge at all — tests/test_module_boundaries.py, the authority for
+# seam ③, drops `owner == target` before it checks anything — so the ban is
+# lifted inside each module's own directory, and only there. Add a line here
+# when a module grows, together with its row in ALLOWED_EDGES.
+"packages/hlens-core/src/hlens_core/ratelimit/*" = ["TID251"]
+# A module's offline tests have to import the module they test. Tests are not
+# modules: they are not scanned by the boundary test (it walks `packages/`
+# only) and they write no table, so seam ③ has nothing to say about them.
+"tests/*" = ["TID251"]
 
 # --------------------------------------------------------------------------- #
 # mypy
