@@ -26,7 +26,7 @@ First slice: **Binance (CEX) + Hyperliquid (DEX), perpetual futures.** One centr
 | Document | Contents |
 |---|---|
 | [`docs/01-PRODUCT.md`](docs/01-PRODUCT.md) | 定位、原则、范围、里程碑 |
-| [`docs/02-FEATURES.md`](docs/02-FEATURES.md) | M1 + M2 的功能定义 |
+| [`docs/02-FEATURES.md`](docs/02-FEATURES.md) | M1–M6 的功能定义（`F1`–`F31`） |
 | [`docs/03-ARCHITECTURE.md`](docs/03-ARCHITECTURE.md) | 架构与方案设计 |
 | [`docs/04-DATA-SOURCES.md`](docs/04-DATA-SOURCES.md) | 数据源、接口、限速 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 进度与决定记录 |
