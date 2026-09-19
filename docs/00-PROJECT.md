@@ -1,10 +1,10 @@
 # hlens CryptoPlus · 项目文档（v4.0，2026-09-19）
 
-> 文档集（现行）：`00-PROJECT.md`（本文：定位、原则、范围、架构、里程碑）· `01-FEATURES.md`（已确认的功能定义，目前覆盖 M1 + M2）· `06-DATA-SOURCES.md`（数据源与限速实测）· `PROGRESS.md`（进度与决定记录）· `adapter/`（适配器研究）· `reports/`（单次实测报告）。v3.1 的 01–05、OpenAPI 契约与当时的审核记录已归档到 `docs/archive/v3.1/`，更早的在 `docs/archive/v1-v2/`。
+> 文档集（现行）：`00-PROJECT.md`（本文：定位、原则、范围、架构、里程碑）· `01-FEATURES.md`（已确认的功能定义，目前覆盖 M1 + M2）· `02-ARCHITECTURE.md`（架构与方案设计，M1 + M2）· `06-DATA-SOURCES.md`（数据源与限速实测）· `PROGRESS.md`（进度与决定记录）· `reports/`（单次实测报告）。v3.1 的 01–05、OpenAPI 契约与当时的审核记录已于 2026-09-19 从工作树删除，可在 git 历史 commit `c8e70fe` 找回。
 >
 > **v4.0 相对 v3.1 的改动**：定位从"永续散户的棱镜看板"扩为"多所加密情报与量化研究系统"（棱镜隐喻不变）；第一切片收窄为 **Binance + Hyperliquid、仅永续**（一个 CEX + 一个 DEX）；受众顺序定为**公开网站与社群优先、量化 / Agent 开发者其次**；新增"策略"的边界定义（可复现研究与回测，不是信号）；**钱包 / 大户追踪确认属于本项目**，与 hub 历史导入同排在 M5；基础设施从东京 + 新加坡双机改为**单台 VPS、四个容器**；存储定为 **PostgreSQL 16 + TimescaleDB**（Redis 推迟到对外 WS 推送）；范围从 Phase 1/2/3 + 待定改为**蓝图 + M1–M6 里程碑**（以小时计，不排日历）；技术栈一次性定稿（§7.4）。v3.1 原文在 git 历史（commit `e693da7`）。
 >
-> **文档已清理（2026-09-19）**：v3.1 的 `01`–`05` 与 `api/openapi.yaml` 已整体归档，不再是实施依据（`archive/v3.1/README.md` 写明各自还值得读什么）；`README.md`、`AGENTS.md`、agent 定义已对齐本文。`06-DATA-SOURCES.md` 保留六所实测作参考，顶部注明第一切片只用 Binance + Hyperliquid。M3 的 API 契约从届时确认的功能定义重新起一份精简版，不从归档的 45 端点裁。**功能怎么做以 `01-FEATURES.md` 为准，其余以本文为准。**
+> **文档已清理（2026-09-19）**：v1–v3.1 的文档、OpenAPI 契约、审核记录与旧的 adapter 研究已从工作树删除，可在 git 历史 commit `c8e70fe` 找回，不再是实施依据；`README.md`、`AGENTS.md`、agent 定义已对齐本文。`06-DATA-SOURCES.md` 保留六所实测作参考，顶部注明第一切片只用 Binance + Hyperliquid。M3 的 API 契约从届时确认的功能定义重新起一份精简版，不从已删除的 45 端点裁。**功能怎么做以 `01-FEATURES.md` 为准，其余以本文为准。**
 
 ## 1. 一句话
 
@@ -110,6 +110,8 @@ raphael 说每周 20+ 小时。**按 15 小时/周排，25 视为上行**。事�
 外加前端接缝：**前端只读版本化 JSON**，除此不碰后端——所以 M2 升级现有静态站、以后换任何前端框架，都不动后端。
 
 ### 7.4 技术栈（两档：已定 / 待架构评审）
+
+> **"待架构评审"各行的结论见 `02-ARCHITECTURE.md` §6**（待 raphael 确认）：暂不装 TimescaleDB、M1/M2 不要 API 服务器与前端框架、四容器部署。确认后本表同步。
 
 流程：raphael 给产品需求 → `product-manager` agent 写成各里程碑的功能定义与验收 → `architect` agent 在硬约束下选型（必须列出被否决的备选与理由，每个组件对应一条具体需求）→ `reviewer` 挑错 → Claude 汇总并负责删减。**raphael 对框架的熟悉程度不是选型约束**（代码由 agent 写）；约束是 agent 在该语言上的返工率、生态是否对口、单人排障是否简单、月成本。**已定**的两项不重开：后端 Python（采集核心已写好并审过，研究必须用 Python 数据生态）、数据库 PostgreSQL。其余标"待架构评审"的行是现状或暂定，不是结论。
 

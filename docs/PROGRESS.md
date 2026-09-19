@@ -10,7 +10,7 @@
 
 | # | 任务 | 角色 / 模型 | 状态 | 更新 | 备注 |
 |---|---|---|---|---|---|
-| M1-0 | **架构设计 / 方案设计文档** `docs/02-ARCHITECTURE.md`：在 00 §7 的硬约束与五个接缝内，依据 `01-FEATURES.md` 的需求清单，定模块划分、数据流、表的归属、进程清单、部署、待评审的技术选型（每项列被否决的备选与理由） | architect / Opus → reviewer / Opus → Claude 汇总 | 进行中 | 09-19 | **所有编码任务的前置**。每个组件必须对应一条已确认需求，对不上就删 |
+| M1-0 | **架构设计 / 方案设计文档** `docs/02-ARCHITECTURE.md` | architect / Opus + Claude | 待审 | 09-19 | **v1 已完成，待 raphael 确认**；确认前不派编码任务。要点：四个容器（postgres / collector / nginx / cloudflared）+ 宿主备份定时器；原生 PostgreSQL 按月分区、暂不装 TimescaleDB；网站经 Cloudflare 隧道读 VPS 的版本化 JSON；状态页 = 静态页 + Cloudflare Access；外部死人开关发告警；不要 Redis / 消息队列 / ORM / API 服务器（M3 再说）。最低机器 2 vCPU / 4 GB / 80 GB。需要 raphael 回答的问题在 02 §12 |
 | M1-1 | Hyperliquid 行情适配器（**仅行情方法**） | backend-dev / Opus | 待办 | 09-19 | **最高优先**（承接 09-12"优先做 Hyperliquid"）。`liquidation_*` 按 `lower_bound` 声明；逐笔成交与盘口深度声明为能力但标 unsupported。**`AGENTS.md` §3 仍写着 "plus Hyperliquid-only wallet methods"——派活简报必须显式覆盖该条，直到 M1-8 改掉它**。不依赖 `S0-4a`/`S0-4b` 分支；若将来合并用 rebase 处理基类冲突 |
 | M1-2 | 审查 M1-1（契约、限速预算、能力声明、fixtures、符号映射） | reviewer / Opus | 待办 | 09-19 | 按 `AGENTS.md` §3/§4 验收 |
 | M1-3 | 适配器协议：补逐笔成交 / 盘口深度的能力声明（接缝 2），并把**钱包协议作为独立接口定义出来、不写实现**（接缝 5） | backend-dev / Opus | 待办 | 09-19 | 00 §7.3。钱包协议与行情 `VenueAdapter` 分开，M5 才有实现 |
@@ -86,3 +86,4 @@ RB-4（钱包 / 大户归属）已于 09-19 决定：**属于本项目，排 M5*
 - 09-19 **新增只读运行状态后台**（M1-10）：raphael 明确要一个能看到项目运行状态的后台。做最小版（一页、只读、仅本人），不做可写的管理后台。
 - 09-19 **先架构、后开发；慢慢做**：raphael 定——功能定义完成后先清理项目，再出架构设计 / 方案设计文档（M1-0），确认后才开始编码；项目按模块逐个推进。
 - 09-19 **彻底清理**（raphael："所有全部清理掉"）：远端与本地分支 `S0-4a`、`S0-4b` 删除（仓库外留 bundle 备份）；远端只剩 `main`。
+- 09-19 **架构设计 v1 完成**（`02-ARCHITECTURE.md`）。它指出两处功能定义与事实不符，待 raphael 拍板：① Hyperliquid 没有公开爆仓流（06 §2.5 实测），M2 的爆仓只能是"Binance 已观测爆仓 ≥ $X"，HL 到 M5 随钱包链路接入；② "两所费率差"的分钟序列无法回补，头 30 天默认显示"数据积累中"。另：旧文档目录 `docs/archive/`、`docs/adapter/` 已从工作树删除，可在 git 历史 `c8e70fe` 找回。

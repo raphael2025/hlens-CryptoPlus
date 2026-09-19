@@ -1,3 +1,0 @@
-extends: [recommended]
-rules:
-  no-unused-components: off   # Stream* and SnapshotFile are referenced from x-hlens-ws / docs, not from paths

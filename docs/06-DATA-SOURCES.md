@@ -1,8 +1,8 @@
 # hlens · 数据需求与数据源清单（06-DATA-SOURCES，v1.0，2026-09-12）
 
-> **00 v4.0 说明（2026-09-19）**：第一切片只采 Binance + Hyperliquid；本文里 Bybit / OKX / Gate / Bitget 各节保留作"以后"（`00-PROJECT.md` §5.3）候选清单，不是现在要实现的范围。本文对 `03-DEVELOPMENT`、`05-DOCKER` 的引用已随这两份文档归档（见 `docs/archive/v3.1/`），以 `00-PROJECT.md` §7 为准。Hyperliquid 大户 / 钱包相关小节（§2.7 等）从 **M5** 起才适用，此前 HL 适配器只实现行情方法。
+> **00 v4.0 说明（2026-09-19）**：第一切片只采 Binance + Hyperliquid；本文里 Bybit / OKX / Gate / Bitget 各节保留作"以后"（`00-PROJECT.md` §5.3）候选清单，不是现在要实现的范围。本文对 `03-DEVELOPMENT`、`05-DOCKER` 的引用已随这两份文档于 2026-09-19 从工作树删除（可在 git 历史 commit `c8e70fe` 找回），以 `00-PROJECT.md` §7 为准。Hyperliquid 大户 / 钱包相关小节（§2.7 等）从 **M5** 起才适用，此前 HL 适配器只实现行情方法。
 >
-> 回答三个问题：**我们要什么数据**（§2）、**从哪个官方接口拿**（§3）、**限速与预算怎么算**（§4）。字段名以 `packages/hlens-core` 的 contracts 为准（原先指向的 `api/openapi.yaml` 与 `03-DEVELOPMENT.md` 已归档，见 `archive/v3.1/`）。限速数字标注来源：`官方` = 官方文档原文（2026-09-12 核对）、`实测` = 我们的仓库或 Actions 探测记录、`未验证` = 文档未明写，按保守值记账。
+> 回答三个问题：**我们要什么数据**（§2）、**从哪个官方接口拿**（§3）、**限速与预算怎么算**（§4）。字段名以 `packages/hlens-core` 的 contracts 为准（原先指向的 `api/openapi.yaml` 与 `03-DEVELOPMENT.md` 已于 2026-09-19 删除，可在 git 历史 commit `c8e70fe` 找回）。限速数字标注来源：`官方` = 官方文档原文（2026-09-12 核对）、`实测` = 我们的仓库或 Actions 探测记录、`未验证` = 文档未明写，按保守值记账。
 >
 > 三条硬规则：① 限速按**公网出口 IP** 记账，同宿主机所有进程共用一份；② 预算按官方上限的 **40%** 使用，HL 按 90% 使用但记账口径 1200；③ 每个来源在采集器启动时跑一次自检（§6），结果写 `source_health`，状态页公示。
 
@@ -225,7 +225,7 @@ fill 对象（2026-09-12 实测）：`cloid, closedPnl, coin, crossed, dir, fee,
 
 排行榜 `GET https://stats-data.hyperliquid.xyz/Mainnet/leaderboard`：官方前端同源、**无文档**、CloudFront 静态 JSON、不吃 `/info` 权重；`leaderboardRows[]{ethAddress, accountValue, windowPerformances[[day|week|month|allTime, {pnl, roi, vlm}]]}`。`accountValue` 含现货，不可作永续分层依据。
 
-WebSocket 订阅：`allMids`、`trades{coin}`、`candle{coin,interval}`、`userFills{user}`、`userEvents`、`userFundings`、`activeAssetCtx{coin}`、`bbo{coin}`、`clearinghouseState`。官方 WS 限制：**每 IP ≤ 10 连接、每分钟 ≤ 30 次新连接、≤ 1000 订阅、≤ 10 个不同 user、≤ 2000 消息/min、≤ 100 个在飞 post**。**注意"每 IP ≤ 10 个不同 user"**：这条与 `03-DEVELOPMENT`（已归档，见 archive/v3.1）§4.1"WS `userFills` 订阅 hot 200 钱包"冲突，见 §7。WS 不消耗 `/info` 权重（文档结构隐含，非原文）。
+WebSocket 订阅：`allMids`、`trades{coin}`、`candle{coin,interval}`、`userFills{user}`、`userEvents`、`userFundings`、`activeAssetCtx{coin}`、`bbo{coin}`、`clearinghouseState`。官方 WS 限制：**每 IP ≤ 10 连接、每分钟 ≤ 30 次新连接、≤ 1000 订阅、≤ 10 个不同 user、≤ 2000 消息/min、≤ 100 个在飞 post**。**注意"每 IP ≤ 10 个不同 user"**：这条与 `03-DEVELOPMENT`（已删除，见 git 历史 `c8e70fe`）§4.1"WS `userFills` 订阅 hot 200 钱包"冲突，见 §7。WS 不消耗 `/info` 权重（文档结构隐含，非原文）。
 
 限速规则（官方 + 实测）：`/info` 每 IP **1200 权重 / min**；权重 2 组 = `l2Book, allMids, clearinghouseState, orderStatus, spotClearinghouseState, exchangeStatus`；`userRole` 60；其余 20；历史类每 20 条 +1（`candleSnapshot` 每 60 条 +1）。响应头**没有任何限速字段**。实测：① 单出口容量约 2350–2990 权重/min，比文档宽，**记账仍按 1200**；② 两种 429：响应体 JSON `null` = 权重限速 → 退避权重；nginx HTML 页 = 连接速率限速 → 降并发，`max_inflight` 硬顶 10，超过吞吐反降；③ 串行只能用掉 25% 预算，8 线程刚好打满；④ AIMD：撞 429 砍到 75% 冻结 1 h。地址级限速只针对下单，读接口没有。
 
@@ -268,7 +268,7 @@ WebSocket 订阅：`allMids`、`trades{coin}`、`candle{coin,interval}`、`userF
 | HL `/info` | `metaAndAssetCtxs` 20；`clearinghouseState` hot 200×2 = 400 + warm 800÷10×2 = 160；`userFillsByTime` 补齐 ≤ 20 次 × ~25 = 500 上界 | ≤ 1080 | **100%，紧** |
 | HL WS | `allMids` 1 + `trades` 35 币 + `candle` 5 币 + `userFills` ≤ 8 user | ≈ 50 订阅 | 5% |
 
-HL 是唯一紧的来源，而且**官方 WS 限制每 IP 只能订阅 10 个不同 user**，`03-DEVELOPMENT`（已归档，见 archive/v3.1）§4.1 写的"WS `userFills` 订阅 hot 200"做不到。替代方案（S0 验证）：WS `trades{coin}` 的每条成交带 `users: [buyer, seller]` 两个地址，订阅核心币与前 30 币的 `trades` 就能零权重看到这些币上**所有钱包**的成交；hot 钱包再用 `clearinghouseState` 每分钟对账，仓位有变化才拉 `userFillsByTime`。这样 200 hot 钱包不需要 200 个 user 订阅。此方案若验证通过，`03` §4.1 与 `05` 的 whale-engine 描述要改。
+HL 是唯一紧的来源，而且**官方 WS 限制每 IP 只能订阅 10 个不同 user**，`03-DEVELOPMENT`（已删除，见 git 历史 `c8e70fe`）§4.1 写的"WS `userFills` 订阅 hot 200"做不到。替代方案（S0 验证）：WS `trades{coin}` 的每条成交带 `users: [buyer, seller]` 两个地址，订阅核心币与前 30 币的 `trades` 就能零权重看到这些币上**所有钱包**的成交；hot 钱包再用 `clearinghouseState` 每分钟对账，仓位有变化才拉 `userFillsByTime`。这样 200 hot 钱包不需要 200 个 user 订阅。此方案若验证通过，`03` §4.1 与 `05` 的 whale-engine 描述要改。
 
 ## 5. 出口可达性矩阵（实测）
 
@@ -330,7 +330,7 @@ HL 是唯一紧的来源，而且**官方 WS 限制每 IP 只能订阅 10 个不
 
 ## 9. 与其它文档的关系
 
-- `03-DEVELOPMENT`（已归档，见 archive/v3.1）§4.1 的限速预算段以本文 §4 为准；§4.1 "WS `userFills` hot 200" 待 §7-1 验证后改写。
-- `05-DOCKER`（已归档，见 archive/v3.1）硬规则 2（出口 IP）与本文 §5、§6-1 一致；两机方案已被 `00-PROJECT.md` §7.1 的单机四容器取代。
+- `03-DEVELOPMENT`（已删除，见 git 历史 `c8e70fe`）§4.1 的限速预算段以本文 §4 为准；§4.1 "WS `userFills` hot 200" 待 §7-1 验证后改写。
+- `05-DOCKER`（已删除，见 git 历史 `c8e70fe`）硬规则 2（出口 IP）与本文 §5、§6-1 一致；两机方案已被 `00-PROJECT.md` §7.1 的单机四容器取代。
 - `00-PROJECT` §4.4 新鲜度预算是本文 §1 的输入。
 - `venues.yaml`（S0 产出）直接从 §3、§4 抄常数，附来源列（官方 / 实测 / 未验证）。
