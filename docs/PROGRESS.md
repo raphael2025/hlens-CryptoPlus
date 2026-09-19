@@ -9,8 +9,8 @@
 | S0-1 | `packages/hlens-core` 骨架：contracts、ratelimit（含 HL 权重表）、preflight、适配器协议与能力声明、Binance 参考适配器、离线测试 | backend-dev / Opus | 完成 | 09-12 | 129 离线 + 7 live 测试通过，mypy 干净；reviewer 首轮 7 处限速/重试缺陷已修并加回归测试；Binance WS fixtures 为文档态，待东京重录 |
 | S0-2 | 验证 HL WS `trades` 是否带 `users` 地址、WS 限额与 `userFillsByTime` 计费 | data-engineer / Sonnet | 完成 | 09-12 | 报告 `docs/reports/2026-09-12-hl-ws-trades.md`；方案定案见决定记录 |
 | S0-3 | 法律与来源页：`/terms` `/privacy` `/disclaimer` `/sources`，中英 | frontend-dev / Sonnet | 完成 | 09-12 | 已上线静态站；`config.js` 的 `supportEmail` 是占位，待 raphael 填 |
-| S0-4a | Bybit、OKX 适配器 | Cursor CLI / auto | 进行中 | 09-12 | 独立 worktree，分支 S0-4a |
-| S0-4b | Gate、Bitget 适配器 | Cursor CLI / auto | 进行中 | 09-12 | 独立 worktree，分支 S0-4b |
+| S0-4a | Bybit、OKX 适配器 | Cursor CLI / auto | 待审 | 09-19 | 分支 `S0-4a`（73d89f5，已推远端）：`bybit.py` 657 行、`okx.py` 773 行、两套 fixtures、`venues.yaml` +14 行。**无测试文件，未跑离线套件，未审查**；Cursor 当时未提交，09-19 原样存为 WIP |
+| S0-4b | Gate、Bitget 适配器 | Cursor CLI / auto | 待审（半成品） | 09-19 | 分支 `S0-4b`（498f174，已推远端）：`gate.py` 675 行、Gate 与 Bitget fixtures。**Bitget 适配器本体未写**；无测试，未审查；09-19 原样存为 WIP |
 | S0-4c | Hyperliquid 适配器（含钱包方法） | backend-dev / Opus | 待办 | 09-12 | **提为最高优先**（决定记录 09-12）；若 4a/4b 未合并即开工，基类冲突用 rebase 处理；`liquidation_*` 能力先按 `lower_bound` 声明，`full` 等 S0-11 |
 | S0-11 | HL 节点数据验证：拉一天 `node_fills_by_block` 存档与 hub `hl.liquidation` 逐笔比对，得出实测完整度与按币缺口 | data-engineer / Sonnet | 待办 | 09-12 | 报告 §8 第 0 条；任何"完整度"对外声明的前提；通过后再评估月度存档回填与自跑节点 |
 | S0-5 | `config/venues.yaml`（从 06 抄常数） | backend-dev | 完成 | 09-12 | 随 S0-1 产出，含 source 标签与 budget ≤ limit 校验 |
@@ -19,6 +19,15 @@
 | S0-8 | hub 安全修复（Tailscale 密钥轮换、admin 绑 127.0.0.1） | raphael | 阻塞 | – | |
 | S0-9 | 域名、Telegram 群、CoinGecko Demo key | raphael | 进行中 | 09-12 | TG 群已给并配置进 `config.js`（HLENS CryptoPlus 中文社区）；域名与 CoinGecko key 待给 |
 | S0-10 | 代码审查 S0-1、S0-4 | reviewer / Opus | 进行中 | 09-12 | S0-1 首轮审完：Binance 映射与 venues.yaml 常数全部对上，缺陷集中在 budget.py/http.py |
+
+## 09-19 盘点（重启前基线）
+
+09-12 之后一周无提交。09-19 盘点并收拢：
+
+- S0-4a / S0-4b 的 Cursor 产出一直未提交，已原样提交到各自分支并推远端（见上表），未合并进 main。
+- `reports/2026-09-12-hl-liquidation-coverage.md` 及随附的 00 §6、06 §2.5 修正、"优先做 Hyperliquid"决定已于 09-12 经 PR #1 合入 main；本地 main 与各 worktree 一周未同步，09-19 已对齐，合并后的远端分支已删。
+- **范围待定**：钱包 / 大户追踪是否属于 CryptoPlus（涉及 S0-4c 的钱包方法、S3 大户阶段、`whales` 组端点、静态站鲸鱼透镜）。raphael 09-19 表示尚未决定；定之前这些任务不开工，相关文档不改。
+- 上方 S0 表与 `00-PROJECT.md` §8 的 20 周路线图是 09-12 的计划，**待按新方向重排**，重排前不作为派活依据。
 
 ## 已完成
 
