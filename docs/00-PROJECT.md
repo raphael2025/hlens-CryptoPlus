@@ -1,6 +1,6 @@
 # hlens CryptoPlus · 项目文档（v4.0，2026-09-19）
 
-> 文档集（现行）：`00-PROJECT.md`（本文：定位、原则、范围、架构、里程碑）· `01-FEATURES.md`（已确认的功能定义，目前覆盖 M1 + M2）· `06-DATA-SOURCES.md`（数据源与限速实测）· `PROGRESS.md`（进度与决定记录）· `adapter/`（适配器研究）· `reports/`（单次实测报告）。v3.1 的 01–05、OpenAPI 契约与当时的审核记录已归档到 `docs/archive/v3.1/`，更早的在 `docs/archive/`。
+> 文档集（现行）：`00-PROJECT.md`（本文：定位、原则、范围、架构、里程碑）· `01-FEATURES.md`（已确认的功能定义，目前覆盖 M1 + M2）· `06-DATA-SOURCES.md`（数据源与限速实测）· `PROGRESS.md`（进度与决定记录）· `adapter/`（适配器研究）· `reports/`（单次实测报告）。v3.1 的 01–05、OpenAPI 契约与当时的审核记录已归档到 `docs/archive/v3.1/`，更早的在 `docs/archive/v1-v2/`。
 >
 > **v4.0 相对 v3.1 的改动**：定位从"永续散户的棱镜看板"扩为"多所加密情报与量化研究系统"（棱镜隐喻不变）；第一切片收窄为 **Binance + Hyperliquid、仅永续**（一个 CEX + 一个 DEX）；受众顺序定为**公开网站与社群优先、量化 / Agent 开发者其次**；新增"策略"的边界定义（可复现研究与回测，不是信号）；**钱包 / 大户追踪确认属于本项目**，与 hub 历史导入同排在 M5；基础设施从东京 + 新加坡双机改为**单台 VPS、四个容器**；存储定为 **PostgreSQL 16 + TimescaleDB**（Redis 推迟到对外 WS 推送）；范围从 Phase 1/2/3 + 待定改为**蓝图 + M1–M6 里程碑**（以小时计，不排日历）；技术栈一次性定稿（§7.4）。v3.1 原文在 git 历史（commit `e693da7`）。
 >
