@@ -59,7 +59,7 @@ raphael 在范围表（46 项）里把 36 项标为"现在做"，按表内估算
 
 ### 5.3 以后（未排期，未取消）
 
-Next.js 重写（现在只升级现有静态站）· 用户账号 `/me`（与本项目"核心不登录"冲突，可能永不做；我的仓位保持纯本地，Telegram 告警按 chat id 识别用户）· 更多交易所 Bybit / OKX / Gate / Bitget（未审查的半成品停在远端分支 `S0-4a`（`73d89f5`：`bybit.py`、`okx.py` + fixtures，**无测试**）与 `S0-4b`（`498f174`：`gate.py` + Gate/Bitget fixtures，**Bitget 适配器本体未写**，无测试），**均未合并**）· HL 节点数据验证（原 R0-4）· 双机 HA · 人话预设筛选 · "当时看"回放（`/replay`）· MCP 包 · API key / Pro / Stripe · 对外 WebSocket 推送（Redis 随此项到来）· 多资产扩展。
+前端框架化重写（现在只升级现有静态站；用什么框架待架构评审）· 用户账号 `/me`（与本项目"核心不登录"冲突，可能永不做；我的仓位保持纯本地，Telegram 告警按 chat id 识别用户）· 更多交易所 Bybit / OKX / Gate / Bitget（未审查的半成品停在远端分支 `S0-4a`（`73d89f5`：`bybit.py`、`okx.py` + fixtures，**无测试**）与 `S0-4b`（`498f174`：`gate.py` + Gate/Bitget fixtures，**Bitget 适配器本体未写**，无测试），**均未合并**）· HL 节点数据验证（原 R0-4）· 双机 HA · 人话预设筛选 · "当时看"回放（`/replay`）· MCP 包 · API key / Pro / Stripe · 对外 WebSocket 推送（Redis 随此项到来）· 多资产扩展。
 
 ### 5.4 不做 / 不动
 
@@ -107,21 +107,23 @@ raphael 说每周 20+ 小时。**按 15 小时/周排，25 视为上行**。事�
 4. **高频数据（逐笔、盘口）单独建表 + 按币白名单**，M4 打开它时不碰分钟级链路。
 5. **钱包数据有自己的协议**，与行情 `VenueAdapter` 分开，M5 不改 M1 的代码。
 
-外加前端接缝：**前端只读版本化 JSON**，除此不碰后端——所以 M2 升级现有静态站、以后换 Next.js，都不动后端。
+外加前端接缝：**前端只读版本化 JSON**，除此不碰后端——所以 M2 升级现有静态站、以后换任何前端框架，都不动后端。
 
-### 7.4 技术栈（已定稿）
+### 7.4 技术栈（两档：已定 / 待架构评审）
+
+流程：raphael 给产品需求 → `product-manager` agent 写成各里程碑的功能定义与验收 → `architect` agent 在硬约束下选型（必须列出被否决的备选与理由，每个组件对应一条具体需求）→ `reviewer` 挑错 → Claude 汇总并负责删减。**raphael 对框架的熟悉程度不是选型约束**（代码由 agent 写）；约束是 agent 在该语言上的返工率、生态是否对口、单人排障是否简单、月成本。**已定**的两项不重开：后端 Python（采集核心已写好并审过，研究必须用 Python 数据生态）、数据库 PostgreSQL。其余标"待架构评审"的行是现状或暂定，不是结论。
 
 | 层 | 选定 | 状态 |
 |---|---|---|
-| 后端语言与工具链 | Python ≥ 3.12、uv、hatchling、ruff（line 100）、mypy、pytest + pytest-asyncio + respx | **已在用**（`packages/hlens-core`） |
+| 后端语言与工具链 | Python ≥ 3.12、uv、hatchling、ruff（line 100）、mypy、pytest + pytest-asyncio + respx | **已定、已在用**（`packages/hlens-core`） |
 | 后端库 | httpx、websockets、pydantic v2、pyyaml | **已在用**（同上） |
-| Web 框架 | FastAPI | 已选定、未实现（M3 才有代码） |
-| 数据库 | PostgreSQL 16 + TimescaleDB | 已选定、未实现（M1） |
+| API 形态与 Web 框架 | 暂定 FastAPI（REST） | **待架构评审**（M3 前定；无代码） |
+| 数据库 | PostgreSQL 16（TimescaleDB 扩展暂定） | **已定**（PostgreSQL）；扩展的取舍随 M1-4 表结构设计定；未实现 |
 | 缓存 | Redis | **推迟**，随对外 WebSocket 推送到来 |
 | 前端 | 现有静态站：纯 HTML + CSS + 原生 JS，无构建步骤、无框架（`index.html`、`assets/app.js`、`assets/style.css`、`assets/legal.js`、`config.js`），GitHub Pages 托管 | **已在用** |
-| 前端（未来） | Next.js 15 + TypeScript | **推迟，未否决** |
+| 前端（未来） | 未选 | **待架构评审**（M3 前后，页面间出现共享复杂状态时再评；候选不预设） |
 | 当前线上数据管道 | `scripts/fetch.py`（仅 Python 标准库 urllib）由 `.github/workflows/refresh.yml` 每 30 分钟跑，写 `data/latest.json` + `data/history.json` | **已在用**，M2 把站点切到采集器导出的 JSON 之前不动 |
-| 部署 | 一台 VPS、Docker Compose 四容器、Cloudflare Tunnel、R2 备份 | 已选定、未实现 |
+| 部署 | 一台 VPS（已定）；Docker Compose 四容器、Cloudflare Tunnel、R2 备份（暂定） | 细节**待架构评审**，卡在 RB-1 的机器规格；未实现 |
 
 ## 8. 里程碑（以小时计，无日历）
 
