@@ -3,7 +3,7 @@
 Read this before touching anything. Task tracking lives in `docs/PROGRESS.md`; take a task id from there (e.g. `S0-4`) and put it in your branch name and PR title.
 
 ## 1. What this project is
-hlens-CryptoPlus shows the *state* of a crypto perpetual market (who is long, who is crowded, where liquidations sit) and never gives entry/exit advice. Read `docs/00-PROJECT.md` (why), `docs/06-DATA-SOURCES.md` (what data, which endpoints, rate limits), `docs/adapter/ADAPTER-RESEARCH.md` (adapter protocol), `docs/03-DEVELOPMENT.md` (layout, data model, services). Field names come from `api/openapi.yaml`.
+hlens-CryptoPlus shows the *state* of a crypto perpetual market (who is long, who is crowded, where liquidations sit) and never gives entry/exit advice. Read `docs/00-PROJECT.md` (why, principles, architecture §7, milestones §8), `docs/01-FEATURES.md` (feature definitions for the current milestones), `docs/06-DATA-SOURCES.md` (what data, which endpoints, rate limits), `docs/adapter/ADAPTER-RESEARCH.md` (adapter protocol). Field names follow the contracts in `packages/hlens-core` until an API contract exists again in M3. Feature definitions in `docs/01-FEATURES.md` are changed only by raphael's decision, not by coding agents.
 
 ## 2. Hard rules
 1. **Do not touch the live static site**: `index.html`, `assets/`, `scripts/fetch.py`, `.github/workflows/`, `data/`, `config.js` — unless the task id explicitly names them.
@@ -21,7 +21,7 @@ hlens-CryptoPlus shows the *state* of a crypto perpetual market (who is long, wh
 1. Copy `packages/hlens-core/src/hlens_core/adapters/binance.py` structure; declare `CapabilitySet` honestly (`supported` / `mode` / `completeness`).
 2. Endpoints, fields, and limits are in `docs/06-DATA-SOURCES.md` §3.x for your venue; constants go in `config/venues.yaml` with a `source: official|measured|unverified` tag.
 3. Record fixtures once from a non-US egress (this machine works), trim to ≤ 3 items per list, commit them.
-4. Implement: `discover_instruments`, `fetch_mark_prices`, `fetch_funding_rates`, `fetch_open_interest`, `fetch_long_short_ratios`, `fetch_klines`, `fetch_ticker_24h`, `stream_mark_price`, `stream_liquidations` (mark `throttled_source` where the venue throttles), plus Hyperliquid-only wallet methods for HL.
+4. Implement: `discover_instruments`, `fetch_mark_prices`, `fetch_funding_rates`, `fetch_open_interest`, `fetch_long_short_ratios`, `fetch_klines`, `fetch_ticker_24h`, `stream_mark_price`, `stream_liquidations` (mark `throttled_source` where the venue throttles). The Hyperliquid adapter implements market-data methods only; wallet data gets its own protocol in M5 and must never be added to `VenueAdapter`. Trades and order-book are declared as capabilities on every adapter but marked `unsupported` until M4 — do not implement them early.
 5. Symbol mapping both ways (`BTCUSDT` / `BTC-USDT-SWAP` / `BTC_USDT` ↔ `BTC`).
 6. `uv run pytest -q` and `uv run ruff check src tests` green; run `python -m hlens_core.preflight --venues <venue>` once and paste the table in the PR.
 

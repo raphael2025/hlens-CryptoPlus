@@ -4,6 +4,8 @@
 
 Live site: `https://raphael2025.github.io/hlens-CryptoPlus/` · Free · Open source (MIT) · No API keys · Refreshed every 30 min by GitHub Actions · English / 中文
 
+**Where this is going:** the project is being rebuilt (v4.0, 2026-09-19) into a multi-venue crypto intelligence & quant research system, keeping the prism metaphor. The first slice is a Python + PostgreSQL backend collecting Binance and Hyperliquid perpetuals; the site below (six venues, whale lens) keeps running unchanged until that work reaches it. Milestones M1–M6 are in [docs/00-PROJECT.md §8](docs/00-PROJECT.md).
+
 ## What it shows
 
 - **The prism** — for each coin: retail long share, top-trader long share, taker buy share, Hyperliquid whale long share, OI-weighted 8h funding, total open interest, a transparent crowding score, and per-venue detail.
@@ -34,7 +36,7 @@ Edit `config.js` to set community links (Telegram / Discord / X) and the GitHub 
 | `data/latest.json` | full snapshot: `coins[]` (prism facets + per-exchange rows), `whales` (wallets, by_coin, top_positions), `macro`, `sources` |
 | `data/history.json` | last 7 days of `[price, funding_8h, oi_total_usd, retail_long_share, whale_long_share, crowding]` per coin, one point per refresh |
 
-The static snapshot (`data/latest.json`) is an independent v0.1 schema (`SnapshotFile` in the contract); from stage S1 it migrates to the production `Prism` field names. The project is documented as a core set from `docs/00-PROJECT.md` through `docs/06-DATA-SOURCES.md`: [00-PROJECT](docs/00-PROJECT.md) (why, scope, roadmap, community ops), [01-FEATURES](docs/01-FEATURES.md) (pages, components, sentence engine, state dictionary, visual identity), [02-API](docs/02-API.md) + [api/openapi.yaml](api/openapi.yaml) (the single source of truth for frontend/backend types), [03-DEVELOPMENT](docs/03-DEVELOPMENT.md) (repo layout, data model, services, tests, CI/CD, deployment), [04-ARCHITECTURE-REVIEW](docs/04-ARCHITECTURE-REVIEW.md) (what is reused from raphael's existing repos and what is not touched), [05-DOCKER](docs/05-DOCKER.md) (container layout for the two VPS), and [06-DATA-SOURCES](docs/06-DATA-SOURCES.md) (data requirements, sources, reachability, and budgets). The adapter research is in [docs/adapter/](docs/adapter/). Older drafts live in `docs/archive/`; review records in `docs/reviews/`.
+The static snapshot (`data/latest.json`) is the live site's own schema; whether and how it migrates to a future backend contract is undecided until M3, see [docs/00-PROJECT.md §7.4](docs/00-PROJECT.md). The living doc set is [docs/00-PROJECT.md](docs/00-PROJECT.md) (why, scope, principles, architecture, milestones), [docs/01-FEATURES.md](docs/01-FEATURES.md) (feature definitions for the current milestones), [docs/06-DATA-SOURCES.md](docs/06-DATA-SOURCES.md) (data requirements, sources, reachability, budgets), and [docs/PROGRESS.md](docs/PROGRESS.md) (task tracking). Adapter research is in [docs/adapter/](docs/adapter/); review records in [docs/reviews/](docs/reviews/). The superseded v3.1 plan (six-venue API contract, two-host Docker layout, 20-week roadmap) is archived at [docs/archive/v3.1/](docs/archive/v3.1/README.md) and is not an implementation basis.
 
 ## Sources
 
@@ -50,6 +52,8 @@ hlens is a research tool. Nothing here is investment advice. Leveraged perpetual
 
 **一个币，所有角度。** hlens 把一个合约市场分解成里面的人：散户、大账户、链上大户，横跨 Binance、Bybit、OKX 和 Hyperliquid。三方意见相左，就是信号。
 
-免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。项目、功能、契约、数据源与开发文档见 [`docs/00-PROJECT.md`](docs/00-PROJECT.md) 至 [`docs/06-DATA-SOURCES.md`](docs/06-DATA-SOURCES.md)；适配器研究见 [`docs/adapter/ADAPTER-RESEARCH.md`](docs/adapter/ADAPTER-RESEARCH.md)。
+**未来方向：** 项目正在重启（v4.0，2026-09-19），定位扩为"多所加密情报与量化研究系统"，棱镜隐喻不变。第一切片是用 Python + PostgreSQL 采集 Binance 与 Hyperliquid 永续；下方的线上静态站（六所、鲸鱼透镜）在此之前照常运行不变。里程碑 M1–M6 见 [docs/00-PROJECT.md §8](docs/00-PROJECT.md)。
+
+免费、开源（MIT）、不需要 API key、GitHub Actions 每 30 分钟刷新、中英双语。本地运行见上方命令；社群入口在 `config.js` 里配置。现行文档集见 [`docs/00-PROJECT.md`](docs/00-PROJECT.md)、[`docs/01-FEATURES.md`](docs/01-FEATURES.md)、[`docs/06-DATA-SOURCES.md`](docs/06-DATA-SOURCES.md) 与 [`docs/PROGRESS.md`](docs/PROGRESS.md)；适配器研究见 [`docs/adapter/ADAPTER-RESEARCH.md`](docs/adapter/ADAPTER-RESEARCH.md)；v3.1 旧方案已归档于 [`docs/archive/v3.1/`](docs/archive/v3.1/README.md)，仅供参考，不作为实现依据。
 
 本站是研究工具，不构成投资建议。带杠杆的永续合约可能亏损超过本金。
