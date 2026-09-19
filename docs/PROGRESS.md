@@ -1,37 +1,42 @@
 # 开发进度（由 Claude 维护，每次派活或收工更新）
 
-> 阶段定义见 `00-PROJECT.md` §8（v4.0 起为有序阶段，无日历；每周工时待 raphael 给出）。范围见 §5。角色定义见 `.claude/agents/`。状态：`待办` `进行中` `待审` `完成` `阻塞`。
+> 里程碑定义见 `00-PROJECT.md` §8（v4.0 起为 M1–M6，以小时计、无日历；工时假设 15 小时/周见 §7.2）。范围与蓝图见 §5。角色定义见 `.claude/agents/`。状态：`待办` `进行中` `待审` `完成` `阻塞`。
 
-## 当前阶段：R0 重启地基（2026-09-19 开始）
+## 当前阶段：M1 两所跑起来（2026-09-19 开始，~120 h）
 
-第一切片 = Binance + Hyperliquid，仅永续。钱包 / 大户范围未定（见下方"待 raphael 决定"），相关任务一律不开工。
+第一切片 = Binance + Hyperliquid，仅永续。钱包 / 大户追踪**已确认属于本项目**，但排在 M5（与 hub 历史导入同进同退），M1 只做行情，钱包只定接口不写实现。
 
 | # | 任务 | 角色 / 模型 | 状态 | 更新 | 备注 |
 |---|---|---|---|---|---|
-| R0-1 | 把 `00-PROJECT.md` 与本文件重写为 v4（新定位、双所第一切片、Phase 1/2/3、策略边界、待定项） | Claude | 完成 | 09-19 | 00 v4.0；v3.1 原文在 commit `e693da7` |
-| R0-2 | Hyperliquid 适配器（**仅行情方法**；钱包方法待 §5.4 范围决定后再说） | backend-dev / Opus | 待办 | 09-19 | **最高优先**（承接 09-12"优先做 Hyperliquid"）。`liquidation_*` 能力按 `lower_bound` 声明，`full` 等 R0-4。不依赖 `S0-4a`/`S0-4b` 分支；若将来合并用 rebase 处理基类冲突 |
-| R0-3 | 审查 R0-2（契约、限速预算、能力声明、fixtures、符号映射） | reviewer / Opus | 待办 | 09-19 | 按 `AGENTS.md` §3/§4 验收 |
-| R0-4 | HL 节点数据验证：拉一天 `node_fills_by_block` 存档与 hub `hl.liquidation` 逐笔比对，得出实测完整度与按币缺口 | data-engineer / Sonnet | 待办 | 09-19 | 原 S0-11。强平覆盖率报告 §8 第 0 条；任何"完整度"对外声明的前提；通过后再评估月度存档回填与自跑节点 |
-| R0-5 | 下游文档同步到 v4 范围：`01`、`02` + `api/openapi.yaml`、`03`、`05`、`06`、`README.md`、`AGENTS.md` | Claude | 待办 | 09-19 | 它们仍写六所范围与大户功能；**同步完成前一律以 00 为准**。`whales` 组端点等 §5.4 决定，先不动 |
-| R0-6 | Binance WS fixtures 从东京重录（现有为文档推导态） | data-engineer / Sonnet | 阻塞 | 09-19 | 原 S0-1 遗留；卡在 VPS（见下） |
+| M1-1 | Hyperliquid 行情适配器（**仅行情方法**） | backend-dev / Opus | 待办 | 09-19 | **最高优先**（承接 09-12"优先做 Hyperliquid"）。`liquidation_*` 按 `lower_bound` 声明；逐笔成交与盘口深度声明为能力但标 unsupported。**`AGENTS.md` §3 仍写着 "plus Hyperliquid-only wallet methods"——派活简报必须显式覆盖该条，直到 M1-8 改掉它**。不依赖 `S0-4a`/`S0-4b` 分支；若将来合并用 rebase 处理基类冲突 |
+| M1-2 | 审查 M1-1（契约、限速预算、能力声明、fixtures、符号映射） | reviewer / Opus | 待办 | 09-19 | 按 `AGENTS.md` §3/§4 验收 |
+| M1-3 | 适配器协议：补逐笔成交 / 盘口深度的能力声明（接缝 2），并把**钱包协议作为独立接口定义出来、不写实现**（接缝 5） | backend-dev / Opus | 待办 | 09-19 | 00 §7.3。钱包协议与行情 `VenueAdapter` 分开，M5 才有实现 |
+| M1-4 | Postgres + Timescale 的 Phase-1 表结构；高频表（逐笔、盘口）**只设计不建表**（接缝 4） | backend-dev / Opus | 待办 | 09-19 | 00 §7.4 定为 PostgreSQL 16 + TimescaleDB；高频表单独建、按币白名单，M4 才打开 |
+| M1-5 | 采集器进程（分钟级；WS 优先：标记价、tickers（**爆仓流属 M2，M1 不接**）；REST：funding、OI、多空比、K 线、instruments；用既有限速预算） | backend-dev / Sonnet | 待办 | 09-19 | 依赖 M1-1、M1-4。导出版本化 JSON 供 M2 的静态站读 |
+| M1-6 | compose 文件：`postgres` + `collector` + `cloudflared` 三容器（`api` 容器 M3 才加） | backend-dev / Sonnet | 阻塞 | 09-19 | 卡在 RB-1。`05-DOCKER.md` 的双机 19 容器布局作废（00 §7.1） |
+| M1-7 | 每日 R2 备份 + 采集器静默 > 10 分钟的 Telegram 心跳告警 | backend-dev / Sonnet | 待办 | 09-19 | 一次恢复演练算在 M1 验收里 |
+| M1-8 | 文档同步与压缩：`01`、`02` + `api/openapi.yaml`（**裁到当前里程碑需要的约 10 个端点，其余归档**）、`03`、`05`、`06`、`README.md`、`AGENTS.md` 对齐 00 v4.0 | Claude | 待办 | 09-19 | 目标：三份活文档 + 归档。同步完成前一律以 00 为准。顺带改掉 `AGENTS.md` §3 的钱包方法一句 |
+| M1-9 | Binance WS fixtures 从 VPS 重录（现有为文档推导态） | data-engineer / Sonnet | 阻塞 | 09-19 | 原 S0-1 遗留、原 R0-6；卡在 RB-1 |
 
 ### 待 raphael 决定 / 提供（阻塞，不派 agent）
 
 | # | 事项 | 状态 | 影响 |
 |---|---|---|---|
-| RB-1 | 两台 VPS 规格、出口 IP、Docker 版本（原 S0-7） | 阻塞 | 容量表、R0-6 fixtures 重录、R1 双机部署 |
-| RB-2 | hub 安全修复（Tailscale 密钥轮换、admin 绑 127.0.0.1）（原 S0-8） | 阻塞 | hub 任何对外使用 |
+| RB-1 | **单台 VPS**：规格（CPU / 内存 / 磁盘）、公网出口 IP、Docker 版本、服务商回收政策（原 S0-7；双机需求已撤销） | 阻塞 | M1-6 compose、M1-9 fixtures 重录、容量表与 **M4 是否开工**的判定 |
+| RB-2 | hub 安全修复（Tailscale 密钥轮换、admin 绑 127.0.0.1）（原 S0-8） | 阻塞 | hub 任何对外使用 → 阻塞 **M5** 的历史导入 |
 | RB-3 | 域名、CoinGecko Demo key、`config.js` 的 `supportEmail`（原 S0-9 余项） | 阻塞 | 上线与法律页联系方式；TG 群已给并已配置 |
-| RB-4 | **钱包 / 大户追踪归属本项目还是另一项目**（00 §5.4） | 待定 | HL 钱包方法、大户引擎与五板、钱包页与 WhaleCard、hub 历史导入、`whales` 端点、静态站鲸鱼透镜 |
 | RB-5 | 头像使用 Binance / Hyperliquid 官方 logo 的处理（去 logo / 改文字 / 加 "not affiliated"） | 待定 | 与 `/disclaimer` 的无关联声明冲突；不阻塞开发 |
+
+RB-4（钱包 / 大户归属）已于 09-19 决定：**属于本项目，排 M5**，故从本表移除，见"决定记录"。
 
 ## 搁置（Parked）
 
 | # | 事项 | 原因 |
 |---|---|---|
-| S0-4a | 分支 `S0-4a`（`73d89f5`，已推远端）：`bybit.py` 657 行、`okx.py` 773 行、两套 fixtures、`venues.yaml` +14 行。**无测试文件，未跑离线套件，未审查，未合并** | 归入 Phase 3（00 §5.3）。Cursor 当时未提交，09-19 原样存为 WIP |
+| S0-4a | 分支 `S0-4a`（`73d89f5`，已推远端）：`bybit.py` 657 行、`okx.py` 773 行、两套 fixtures、`venues.yaml` +14 行。**无测试文件，未跑离线套件，未审查，未合并** | 归入**以后**（00 §5.3）。Cursor 当时未提交，09-19 原样存为 WIP |
 | S0-4b | 分支 `S0-4b`（`498f174`，已推远端）：`gate.py` 675 行、Gate 与 Bitget fixtures。**Bitget 适配器本体未写**；无测试，未审查，未合并 | 同上 |
-| S0-6 | hub 只读导出 + 试导一天数据 | 门控于 RB-4（钱包/大户范围）；另需东京 DB |
+| S0-6 | hub 只读导出 + 试导一天数据 | 归入 **M5**（与大户五块板同进同退）；另需 RB-2 的安全修复与线上 DB |
+| R0-4 | HL 节点数据验证：拉一天 `node_fills_by_block` 存档与 hub `hl.liquidation` 逐笔比对 | 归入**以后**（原 S0-11）。是"完整度"对外声明的前提，但不阻塞 M1–M4；现阶段爆仓一律 `lower_bound` |
 
 ## 已完成
 
@@ -39,7 +44,7 @@
 |---|---|
 | 09-11 | 文档 00–05、OpenAPI 1.1.0、三轮审查 |
 | 09-12 | 06 数据源文档；币种分层决定（核心 5 + 浅层 200）；架构边界定稿（hub 管历史普查，东京管实时与计算，浏览器管个人视图） |
-| 09-12 | **S0-1** `packages/hlens-core` 骨架：contracts、ratelimit（含 HL 权重表、AIMD、硬熔断）、preflight CLI、适配器协议与能力声明、Binance 参考适配器、离线测试。129 离线 + 7 live 测试通过，mypy 干净；reviewer 首轮 7 处限速/重试缺陷已修并加回归测试。遗留：Binance WS fixtures 为文档推导态，待东京重录（→ R0-6） |
+| 09-12 | **S0-1** `packages/hlens-core` 骨架：contracts、ratelimit（含 HL 权重表、AIMD、硬熔断）、preflight CLI、适配器协议与能力声明、Binance 参考适配器、离线测试。129 离线 + 7 live 测试通过，mypy 干净；reviewer 首轮 7 处限速/重试缺陷已修并加回归测试。遗留：Binance WS fixtures 为文档推导态，待从 VPS 重录（→ M1-9） |
 | 09-12 | **S0-5** `config/venues.yaml`（从 06 抄常数），含 `source` 标签与 `budget ≤ limit` 校验；随 S0-1 产出 |
 | 09-12 | **S0-2** 验证 HL WS `trades` 是否带 `users` 地址、WS 限额与 `userFillsByTime` 计费 → `reports/2026-09-12-hl-ws-trades.md`；方案定案见决定记录 |
 | 09-12 | **S0-3** 法律与来源页 `/terms` `/privacy` `/disclaimer` `/sources`（中英）上线静态站；`config.js` 的 `supportEmail` 仍是占位（→ RB-3） |
@@ -47,6 +52,8 @@
 | 09-12 | **S0-10**（部分）代码审查 S0-1 首轮：Binance 映射与 `venues.yaml` 常数全部对上，缺陷集中在 `budget.py`/`http.py`，已修 |
 | 09-19 | 重启前盘点：09-12 之后一周无提交；`S0-4a`/`S0-4b` 的 Cursor 产出一直未提交，09-19 原样提交到各自分支并推远端（未合并 main）；PR #1 已于 09-12 合入 main，但本地 main 与各 worktree 一周未同步，09-19 已对齐并删除合并后的远端分支 |
 | 09-19 | **R0-1** 00 重写为 v4.0、PROGRESS 重排为 R0 |
+| 09-19 | 范围表建成并由 raphael 逐项填完：46 项功能各标 现在做 / 以后 / 不要 + 五个定调问题（<https://claude.ai/artifact/8qLwqEGPbXggBf1TghUi72>）。结果：36 项"现在做"，按表内估算约 1120 小时 |
+| 09-19 | Claude 审查该范围表（受众、服务器、钱包归属、存储、工时五问 + 八处推翻 + 三处改回自己先前建议），**raphael 全盘同意**；据此把 00 改写为蓝图 + M1–M6，PROGRESS 改为 M1 |
 
 ## 决定记录
 
@@ -59,4 +66,12 @@
 - 09-19 **头像能力表分期**，纵向做透不横向铺开：Phase 1 = 双所永续的价格/标记价、费率、OI、（该所公开时的）多空与主动买卖比、`lower_bound` 爆仓事件流、K 线、合约元数据；Phase 2 = 订单流（逐笔 → CVD）、流动性（盘口深度）、现货——**这两项 v3.1 §5 曾明确砍掉，现恢复但后移**，是数据量与限速最重的一类；Phase 3 = 更多交易所（Bybit/OKX/Gate/Bitget，半成品停在 `S0-4a`/`S0-4b`，未合并）、多资产。
 - 09-19 **"策略"的边界**：在 hlens，策略 = 可复现的研究与回测，结论必带样本量 n 与证据标签，公式与窗口公开可重跑；**永远不是**交易信号、喊单、目标价或建议。标语 "See more · Think deeper · Trade wiser" 只是品牌语，产品文案一律遵守原则 1 的禁止词表。原则 1 与证据标签、样本规则不变，该边界写入 00 §4.2。
 - 09-19 **待定：钱包 / 大户追踪（Trader Behavior / On-Chain）归属**——属于 CryptoPlus，还是留在 raphael 的另一个项目、CryptoPlus 只消费其产出？历史：09-12 raphael 先说 HL / 钱包相关工作属于另一个项目，同日文档又记下"优先做 Hyperliquid"；09-19 以 Binance + HL 第一切片确认 **HL 行情数据在范围内**，**钱包 / 大户范围仍未决**。依赖项见 RB-4。决定前不开工、不改相关文档。
+- 09-19（同日晚，推翻上条的"待定"状态）**钱包 / 大户追踪属于本项目**，RB-4 关闭。排在 **M5**，与 hub 历史导入**同进同退，绝不只做一半**（五块板的数字依赖导入数据）。钱包数据走**自己的协议**，与行情 `VenueAdapter` 分开（接缝 5），M1 只定接口不写实现。
 - 09-19 线上静态站（GitHub Pages、`scripts/fetch.py` 每 30 分钟、六所、鲸鱼透镜、法律页）保持原样运行，不属于本次重启范围。
+- 09-19 **范围表五个定调问题的答案**：①受众 = **公开网站与社群优先**（手机优先的永续散户，中英双语），量化 / Agent 开发者其次——这**反转**了 v4.0 初稿 §3 的"研究者优先"；定位语、棱镜隐喻、"只描述不建议"、"策略 = 可复现研究、不是信号"全部不变。②服务器 = **一台 VPS**，东京主 + 新加坡副本的双机设计撤销，双机 HA 列入以后。③钱包 / 大户 = **属于本项目**（见上条）。④存储 = **PostgreSQL 16 + TimescaleDB**；Redis 推迟到做对外 WebSocket 推送时再引入。⑤工时 = raphael 说 20+ 小时/周，**按 15 小时/周排，25 视为上行**；事实记录：09-12 → 09-19 这一周提交数为 0。里程碑只给小时数，不折算日历。
+- 09-19 **蓝图 ≠ 建造顺序**：36 项"现在做"全部留在蓝图，"现在做"读作"在产品里"而**不是**"在前 12 周里"；建造顺序由 00 §8 的 M1–M6 决定。需要提前定的只有少数改起来贵的接口，其余等做到时再定。
+- 09-19 **Claude 审查中推翻范围表、raphael 全部接受的八点**：① Next.js 重写 → 以后；现在只**升级现有静态站**（M2），安全的前提是前端只读版本化 JSON，后端可不动地换栈。② 用户账号 `/me` → 以后、可能永不做，与本项目"核心不登录"冲突；我的仓位保持纯本地，Telegram 告警按 chat id 识别用户。③ **状态词典与记分板现在做不了**：需要数月自采历史，而历史不存在——卡的是**时间不是工作量**，这正是 M1 采集要尽早开始的理由 → M6。④ 逐笔 / CVD 与盘口深度 → M4，门控于 VPS 容量实测（RB-1，数字仍未知）；**接口现在就留**。⑤ 大户五块板 + hub 历史导入**捆绑同排 M5**（≥ 200 h，最重的一块）。⑥ 关键价位 / 爆仓热力图模型 → M6，且必须挂 `模型估算` 证据标签。⑦ Docker Compose：**做，但四个容器**（postgres、collector、api、cloudflared），不是旧计划的 19 个；`05-DOCKER.md` 的双机布局作废。⑧ 按 15 小时/周排。
+- 09-19 **Claude 改回自己先前建议、采纳 raphael 的三处**：① 存储用 **Postgres + TimescaleDB 而非 Parquet 文件**（公开站 + REST + 告警的读写模式撑得起这个依赖）。② **保留 REST API 与 OpenAPI 契约**，但从约 45 个端点**裁到当前里程碑需要的约 10 个**，其余归档到各自里程碑再启用。③（同上第二条）契约文档不废弃，只缩到实际交付面。
+- 09-19 **现在就定死、其余等做到时再定的五个接缝**（00 §7.3）：①归一化数据契约（`hlens-core` contracts，**已存在**）；②带 `supported` / `mode` / `completeness` 能力声明的适配器协议（**已存在**；加一个所 = 加一个文件；逐笔与盘口现在就声明为能力并标 unsupported）；③模块只通过数据库表与契约通信、不互相 import（collector → store → compute → serve，任何一层可单独重写）；④高频数据单独建表 + 按币白名单，M4 开启时不碰分钟级链路；⑤钱包数据独立协议。外加前端接缝：前端只读版本化 JSON。**理由**：在没有代码时预留接口只会让文档变厚。
+- 09-19 **技术栈定稿并按"已在用 / 已选定未实现"标注**（00 §7.4）：已在用 = Python ≥ 3.12 + uv + hatchling + ruff(100) + mypy + pytest/pytest-asyncio/respx、httpx / websockets / pydantic v2 / pyyaml、现有静态站（纯 HTML + CSS + 原生 JS、无构建、GitHub Pages）、`scripts/fetch.py` + `refresh.yml` 每 30 分钟的现行管道；已选定未实现 = FastAPI（M3）、PostgreSQL 16 + TimescaleDB（M1）、一台 VPS + 四容器 Compose + Cloudflare Tunnel + R2；推迟 = Redis（随对外 WS 推送）、Next.js 15 + TypeScript（未否决）。
+- 09-19 **阶段体系替换**：00 v4.0 初稿的 R0–R3 有序阶段**作废**，改为 **M1 两所跑起来 / M2 看得见的成果 / M3 产品化 / M4 重数据 / M5 大户 / M6 可信层**，各带小时规模与一条可判定验收；原 R0 任务重编为 M1-1…M1-9（R0-1 已完成保留，原 R0-4 节点数据验证移出当前阶段归入以后）。
