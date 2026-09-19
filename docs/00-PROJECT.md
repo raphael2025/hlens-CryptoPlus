@@ -59,7 +59,7 @@ raphael 在范围表（46 项）里把 36 项标为"现在做"，按表内估算
 
 ### 5.3 以后（未排期，未取消）
 
-前端框架化重写（现在只升级现有静态站；用什么框架待架构评审）· 用户账号 `/me`（与本项目"核心不登录"冲突，可能永不做；我的仓位保持纯本地，Telegram 告警按 chat id 识别用户）· 更多交易所 Bybit / OKX / Gate / Bitget（未审查的半成品停在远端分支 `S0-4a`（`73d89f5`：`bybit.py`、`okx.py` + fixtures，**无测试**）与 `S0-4b`（`498f174`：`gate.py` + Gate/Bitget fixtures，**Bitget 适配器本体未写**，无测试），**均未合并**）· HL 节点数据验证（原 R0-4）· 双机 HA · 人话预设筛选 · "当时看"回放（`/replay`）· MCP 包 · API key / Pro / Stripe · 对外 WebSocket 推送（Redis 随此项到来）· 多资产扩展。
+前端框架化重写（现在只升级现有静态站；用什么框架待架构评审）· 用户账号 `/me`（与本项目"核心不登录"冲突，可能永不做；我的仓位保持纯本地，Telegram 告警按 chat id 识别用户）· 更多交易所 Bybit / OKX / Gate / Bitget（届时对照 Binance 参考适配器重写；09-12 的 Cursor 半成品无测试、未审查，分支已于 09-19 删除，仅在仓库外留有本地备份）· HL 节点数据验证（原 R0-4）· 双机 HA · 人话预设筛选 · "当时看"回放（`/replay`）· MCP 包 · API key / Pro / Stripe · 对外 WebSocket 推送（Redis 随此项到来）· 多资产扩展。
 
 ### 5.4 不做 / 不动
 

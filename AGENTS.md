@@ -1,6 +1,6 @@
 # AGENTS.md — rules for any coding agent (Cursor, Codex, Claude) working in this repo
 
-Read this before touching anything. Task tracking lives in `docs/PROGRESS.md`; take a task id from there (e.g. `S0-4`) and put it in your branch name and PR title.
+Read this before touching anything. Task tracking lives in `docs/PROGRESS.md`; take a task id from there (e.g. `M1-1`) and put it in your branch name and PR title.
 
 ## 1. What this project is
 hlens-CryptoPlus shows the *state* of a crypto perpetual market (who is long, who is crowded, where liquidations sit) and never gives entry/exit advice. Read `docs/00-PROJECT.md` (why, principles, architecture §7, milestones §8), `docs/01-FEATURES.md` (feature definitions for the current milestones), `docs/06-DATA-SOURCES.md` (what data, which endpoints, rate limits), `docs/adapter/ADAPTER-RESEARCH.md` (adapter protocol). Field names follow the contracts in `packages/hlens-core` until an API contract exists again in M3. Feature definitions in `docs/01-FEATURES.md` are changed only by raphael's decision, not by coding agents.
@@ -17,7 +17,7 @@ hlens-CryptoPlus shows the *state* of a crypto perpetual market (who is long, wh
 9. Do not edit `docs/PROGRESS.md`; the maintainer updates it on merge. Do not add new top-level docs; put reports in `docs/reports/<date>-<topic>.md` (≤ 80 lines).
 10. When the docs and reality disagree (an endpoint moved, a limit differs), fix the code, and add a one-line note to the PR under "Doc corrections" so the maintainer can update `docs/06-DATA-SOURCES.md`.
 
-## 3. How to add a venue adapter (task S0-4 pattern)
+## 3. How to add a venue adapter
 1. Copy `packages/hlens-core/src/hlens_core/adapters/binance.py` structure; declare `CapabilitySet` honestly (`supported` / `mode` / `completeness`).
 2. Endpoints, fields, and limits are in `docs/06-DATA-SOURCES.md` §3.x for your venue; constants go in `config/venues.yaml` with a `source: official|measured|unverified` tag.
 3. Record fixtures once from a non-US egress (this machine works), trim to ≤ 3 items per list, commit them.
