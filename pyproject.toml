@@ -1,0 +1,131 @@
+# hlens CryptoPlus — workspace root.
+#
+# Layout follows the last line of docs/03-ARCHITECTURE.md §4:
+#   packages/hlens-core/      contracts (this task) · ratelimit · preflight · adapters · wallet
+#   packages/hlens-collector/ universe · collector · health · notify · backfill · compute
+#                             · liquidation · export + migrations/NNN_*.sql
+#   config/ deploy/ site/ docs/
+#
+# Every version below is the lock table of docs/03-ARCHITECTURE.md §3. Do not
+# bump one here without bumping it there.
+
+[project]
+name = "hlens-cryptoplus"
+version = "0.0.0"
+description = "hlens CryptoPlus — multi-venue crypto perpetual state reporting (workspace root)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["hlens-core"]
+
+[tool.uv]
+# The root is a virtual workspace root, not a distribution of its own.
+package = false
+# The whole §3 lock table, pinned in one place. A package declares only what it
+# actually imports; these constraints fix the version it resolves to, so a later
+# milestone cannot quietly land a different one.
+constraint-dependencies = [
+  "hatchling==1.32.3",
+  "ruff==0.16.8",
+  "mypy==2.3.1",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "respx==0.23.1",
+  "httpx==0.28.1",
+  "websockets==17.1",
+  "pydantic==2.13.5",
+  "pyyaml==6.0.3",
+  "psycopg==3.3.6",
+  "psycopg-pool==3.3.2",
+]
+
+[tool.uv.workspace]
+members = ["packages/hlens-core"]
+
+[tool.uv.sources]
+hlens-core = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "ruff==0.16.8",
+  "mypy==2.3.1",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "respx==0.23.1",
+]
+
+# --------------------------------------------------------------------------- #
+# pytest — docs/03-ARCHITECTURE.md §3 "测试规范"
+# --------------------------------------------------------------------------- #
+[tool.pytest.ini_options]
+# Hard-coded, deliberately: §3 says never rely on a human remembering the flag.
+addopts = '-m "not live" --strict-markers'
+markers = [
+  "live: touches a real venue endpoint; excluded by addopts and only ever run on purpose",
+]
+# pytest-asyncio 1.4 default. Overriding the `event_loop` fixture is forbidden
+# by §3 — use @pytest.mark.asyncio_event_loop for a wider loop scope.
+asyncio_mode = "strict"
+testpaths = ["tests"]
+
+# --------------------------------------------------------------------------- #
+# ruff — line length 100 per the §3 lock table
+# --------------------------------------------------------------------------- #
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/hlens-core/src", "tests"]
+
+[tool.ruff.lint]
+select = ["ASYNC", "B", "E", "F", "I", "RUF", "TID", "UP", "W"]
+# RUF001-003 flag "ambiguous" Unicode. The authoritative documents are written
+# in Chinese and the conversion rules use "x"; quoting them verbatim in a
+# docstring is how a reader checks the code against the document, so the
+# full-width punctuation and the multiplication sign are deliberate. Identifiers
+# and string values stay ASCII, which is what the rule is actually there for.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# A parent-relative import is the easy way to hop out of your own module
+# subpackage, so only same-level relative imports are allowed. Intra-module
+# imports are `from .sibling import x`; cross-module absolute imports are banned
+# below.
+ban-relative-imports = "parents"
+
+# Seam ③ (docs/03-ARCHITECTURE.md §2): modules talk through database tables and
+# the hlens-core contracts, never by importing each other. Every module
+# subpackage of §4 is banned here EXCEPT `contracts`, which is the shared
+# contract layer every module is allowed to import.
+#
+# This is the fast fence. The authority is tests/test_module_boundaries.py,
+# which asserts the whole dependency graph by AST — §2 names that test as the
+# reviewer's check. A module that grows subpackages of its own will need a
+# per-file-ignore for TID251 here; add it together with the edge in that test.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"hlens_core.ratelimit".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_core.preflight".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_core.adapters".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_core.wallet".msg = "seam ⑤: wallet data has its own protocol and never enters market-data code"
+"hlens_collector.universe".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.collector".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.health".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.notify".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.backfill".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.compute".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.liquidation".msg = "seam ③: import it through a table or a contract, not directly"
+"hlens_collector.export".msg = "seam ③: import it through a table or a contract, not directly"
+
+# --------------------------------------------------------------------------- #
+# mypy
+# --------------------------------------------------------------------------- #
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Production code only, for now. The contracts accept pydantic's lax input forms
+# on purpose — a venue's raw decimal string is the exact value, and
+# `model_validate_json` has to keep working — so a test that feeds `mark="123.4"`
+# is statically a `str` where the annotation reads `Decimal`. Type-checking the
+# tests would mean either widening the read type (wrong: a validated record's
+# `mark` really is a Decimal) or making every adapter pre-convert. That is a
+# call for the adapter step, not for the scaffold; see the PR.
+files = ["packages"]

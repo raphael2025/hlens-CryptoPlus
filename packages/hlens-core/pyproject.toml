@@ -1,0 +1,21 @@
+# hlens-core — seam ① (normalized data contracts) and, from later M1 steps,
+# the rate-limit ledger, the preflight CLI, the venue adapters and the wallet
+# protocol. See docs/03-ARCHITECTURE.md §4.
+#
+# M1-A1 populates `contracts` only. The other module subpackages are created by
+# the step that owns them; there are deliberately no stub packages here.
+
+[build-system]
+requires = ["hatchling==1.32.3"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hlens-core"
+version = "0.1.0"
+description = "Normalized data contracts shared by every hlens CryptoPlus module (seam ①)"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = ["pydantic==2.13.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hlens_core"]
