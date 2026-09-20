@@ -159,8 +159,15 @@ def test_full_opportunistic_on_both_buckets_still_fits_in_80_if_they_share_a_cou
     is ``min(formula, hard cap)``, and the formula shrinks when someone
     else's reservation shrinks our ceiling. Our opportunistic lane gave up
     exactly the 4 the other consumer took (20 -> 16), which is what §6.1's
-    formula is for. The sum is still 80 — with no slack left at all, and with
-    the hard cap of 20 no longer the thing that binds.
+    formula is for. The sum is still 80 — with no slack left at all.
+
+    M1-A3b (2026-09-20) closed the gap that opened here: ``venues.yaml`` kept
+    the hard cap written as 20 even after this formula dropped to 16, so the
+    cap sat above the formula and never bound — a profile that quietly lied
+    about what was reachable, not a safety hole (``opportunistic_available``
+    still clamped to 16 either way). The hard cap is now 16, matching the
+    formula exactly, so it no longer merely "doesn't bind below" the formula —
+    it equals it.
     """
     futures_data = config.bucket(FUTURES_DATA)
     funding_rate = config.bucket(FUNDING_RATE)
@@ -177,8 +184,8 @@ def test_full_opportunistic_on_both_buckets_still_fits_in_80_if_they_share_a_cou
     # Pin the inputs so this test cannot pass by unrelated numbers happening
     # to still add up: it must be exercising 54, 16, 1, 5 and the measured 4.
     assert futures_data.resident_steady_per_min == 54
-    assert futures_data.opportunistic_hard_cap_per_min == 20  # no longer binding
-    assert futures_data.opportunistic_available(54) == 16  # the formula binds
+    assert futures_data.opportunistic_hard_cap_per_min == 16  # M1-A3b: was 20, now matches
+    assert futures_data.opportunistic_available(54) == 16
     assert funding_rate.resident_steady_per_min == 1
     assert funding_rate.opportunistic_available(1) == 5
     assert others == 4  # M1-B measured; this term used to be missing entirely
@@ -372,20 +379,54 @@ def test_binance_opportunistic_is_618_before_the_hard_cap_of_200(
     assert bucket.opportunistic_available(241) == 200
 
 
-def test_futures_data_opportunistic_drops_to_16_and_the_cap_stops_binding(
+def test_futures_data_opportunistic_drops_to_16_and_the_cap_matches_it(
     config: LedgerConfig,
 ) -> None:
-    """§6.1 row 2 gave 80 − max(60, 54) = 20 次/分, equal to the hard cap.
+    """§6.1 row 2 gave 80 − max(60, 54) = 20 次/分, equal to the hard cap at
+    the time that table was written — back when nothing was reserved for
+    another consumer on this bucket, so ``our_ceiling_per_min`` was the same
+    80.
 
-    M1-B's measured 4 for the development machine takes our ceiling to 76, so
-    the formula gives 76 − max(60, 54) = **16**, and ``min(16, 20)`` means the
-    hard cap of 20 has stopped binding. This is the bucket §6 already named as
-    the tightest one we have ("想加币先看这一路"), and it got tighter.
+    M1-B's measured 4 次/分 for the development machine changed that: our
+    ceiling is 76, not 80, so the formula gives 76 − max(60, 54) = **16**.
+    ``opportunistic_available`` was always safe (it is ``min(formula, hard
+    cap)``, and 16 < 20), but the hard cap staying at 20 in ``venues.yaml``
+    meant the profile printed a ceiling nobody could ever reach — the M1-A3b
+    finding. The cap is now 16, so it matches the formula exactly instead of
+    sitting uselessly above it: this is the bucket §6 already named as the
+    tightest one we have ("想加币先看这一路"), and its published headroom now
+    says what it actually is.
     """
     bucket = config.bucket(FUTURES_DATA)
     assert bucket.opportunistic_formula_per_min(54) == 16
-    assert bucket.opportunistic_hard_cap_per_min == 20
+    assert bucket.opportunistic_hard_cap_per_min == 16
     assert bucket.opportunistic_available(54) == 16
+
+
+def test_futures_data_hard_cap_cannot_silently_fork_from_the_formula_again(
+    config: LedgerConfig,
+) -> None:
+    """M1-A3b's finding, pinned so it cannot happen a second time.
+
+    Unlike the Binance weight and HL buckets, ``futures_data``'s hard cap is
+    not deliberately pressed below the formula for backoff headroom — §6.1
+    says it "现在等于算式结果，不再是一个另写的、和公式打架的数". That equality
+    is exactly what went stale: M1-B added ``dev_machine``'s 4 次/分 reservation
+    to this bucket, which moved ``our_ceiling_per_min`` from 80 to 76 and the
+    formula from 20 to 16, and nobody moved the hard cap with it — it kept
+    reading 20 in ``venues.yaml`` for a whole M1-B commit. Safe by luck of
+    ``min()``, but a profile that printed a ceiling nobody could reach.
+
+    This test is the guard, not the ``==16`` assertions above: it recomputes
+    the right-hand side from the bucket's own numbers instead of a literal, so
+    it fails the moment the two drift apart again — including the next time
+    ``egress-consumers.yaml``'s ``dev_machine`` reservation for this bucket
+    changes and ``venues.yaml``'s hard cap is not updated to match.
+    """
+    bucket = config.bucket(FUTURES_DATA)
+    assert bucket.opportunistic_hard_cap_per_min == bucket.our_ceiling_per_min - max(
+        bucket.reserve_per_min, bucket.resident_steady_per_min
+    )
 
 
 def test_hyperliquid_opportunistic_is_67_with_a_deliberately_lower_cap_of_20(

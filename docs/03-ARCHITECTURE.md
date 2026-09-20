@@ -88,7 +88,7 @@ flowchart LR
 | `research` | 一次性导出公开数据集 + notebook | Release 附件 | M2 | F11 |
 | `wallet` 协议（只定接口不实现） | 钱包数据的独立协议 | — | M1 定义 / M5 实现 | ⑤ |
 
-仓库形态：`packages/hlens-core/`（contracts · ratelimit · preflight · adapters/{base,binance,hyperliquid} · wallet/base.py）· `packages/hlens-collector/`（其余模块 + `migrations/NNN_*.sql`）· `config/{venues,export,lexicon.zh}.yaml` · `deploy/{compose.yaml,compose.dev.yaml,nginx.conf}` · `scripts/{backup.sh,serve-backup.sh,pull.sh,drill.sh}` + systemd 单元 · `site/` · `research/*.ipynb` · `docs/`。
+仓库形态：`packages/hlens-core/`（contracts · ratelimit · preflight · adapters/{base,binance,hyperliquid} · wallet/base.py）· `packages/hlens-collector/`（其余模块 + `migrations/NNN_*.sql`）· `config/{venues,export,lexicon.zh}.yaml` · `deploy/{compose.yaml,compose.dev.yaml,nginx.conf}` · `scripts/{backup.sh,serve-backup.sh,pull.sh,drill.sh}` + systemd 单元 · `site/` · `research/*.ipynb` · `docs/`。**`scripts/` 也住 Python 组合根**（M1-A3 起，如 `preflight.py`）——它是唯一允许在同一个 import 块里点名两个模块的文件，因为它在 `packages/` 之外，只做接线，不做业务逻辑；`tests/test_module_boundaries.py` 把它纳入接缝 ③ 的扫描范围并单独断言这一条（M1-A3b）。
 
 ## 5. 数据模型
 
@@ -246,7 +246,7 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 |---|---|---|---|---|---|
 | Binance 权重 | 960/分 | 241/分（其中快道 20） | **300/分** = 241 × 1.25（25% 重试余量，5xx 风暴会让请求数翻倍而 AIMD 只对 429 生效）；其中**快道地板 120/分**，任何时刻不被其余 resident 挤占 | 960 − max(300, 241) = **660/分** | **200/分**（留 460 的退避余量；Binance 侧的 opportunistic 只有 K 线回补，用不到更多） |
 | `fundingRate` 请求桶 | 40 次/分 | **1 次/分**（冷启动 + 每 8h 对账 + 1h `fundingInfo`；loader 只吃整数，`<1` 向上取整） | **2 次/分** = 1 + 1 | 40 − max(2, 1) = **38 次/分** | **5 次/分**——**故意压得远低于算式**：`04 §11 第 10 项` 说「`futures_data` 与 `fundingRate` 是否同一个桶」官方未说明、`未验证`。若其实是同一个，两边都吃满 = (54+20)+(1+38) = **113**，远超 `futures_data` 的 80 红线。`80 − 54 − 20 − 1 = 5` 同桶分桶都安全。**解除条件**：M1-G 上机录 fixture 时确认两者独立之后，可放回 38 |
-| `futures_data` | 80 次/分 | **54 次/分**（3 类 × 180 币 ÷ 10 分钟） | **60 次/分** = 54 + 6。6 次/分的重试余量只有 11%，比权重桶的 25% 低，理由是**这一路的漏请求会自愈**：数据是 5 分钟网格，下一次轮询用 `limit` 会把上一窗口漏掉的点一并取回，所以重试不必抢在本窗口内完成 | 80 − max(60, 54) = **20 次/分** | **20 次/分**——**它现在等于算式结果，不再是一个另写的、和公式打架的数** |
+| `futures_data` | 80 次/分 | **54 次/分**（3 类 × 180 币 ÷ 10 分钟） | **60 次/分** = 54 + 6。6 次/分的重试余量只有 11%，比权重桶的 25% 低，理由是**这一路的漏请求会自愈**：数据是 5 分钟网格，下一次轮询用 `limit` 会把上一窗口漏掉的点一并取回，所以重试不必抢在本窗口内完成 | **我们可用 76 − max(60, 54) = 16 次/分**（M1-B 校正，2026-09-20：本行「天花板」80 次/分是这个桶的出口合计上限，不是我们可用量——`egress-consumers.yaml` 给 `dev_machine` 记了这个桶 4 次/分的预留后，我们可用是 80 − 4 = **76** 次/分，公式要用这个数，不是 80） | **16 次/分**（M1-A3b 由 20 改 16，配置与代码用同一算式：`opportunistic_hard_cap == our_ceiling − max(reserve, resident_steady)`，测试断言这一条）——**它现在又等于算式结果，不再是一个另写的、和公式打架的数；这个数字跟着 `dev_machine` 那份预留走，预留一变这里要重算** |
 | HL 权重（过渡期） | **127/分**（我们那一份，M1-B 实测后） | 44/分 | **60/分**（快道 40 + 元数据与重试 20）；其中**快道地板 40/分 —— M1-B 重算后维持 40 不变**，理由见下表后一段 | 127 − max(60, 44) = **67/分** | **20 权重/分**——**故意压得比算式低**：HL 那一份是从共享出口里切出来的，把它吃满等于把整个出口顶到 1080 的天花板，一点退避余量都不剩 |
 | HL 权重（退役回收后） | 1080/分 | 44/分（M5 后 124/分） | 200/分 | **880/分** | 400/分 |
 

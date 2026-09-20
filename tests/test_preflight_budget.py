@@ -145,20 +145,27 @@ def test_the_binance_weight_bucket_is_green_with_room_to_spare(
 
 
 def test_futures_data_is_the_bucket_that_actually_tightens(budget: LedgerConfig) -> None:
-    """The tightest bucket we have (§6: 想加币先看这一路), now measurably over.
+    """The tightest bucket we have (§6: 想加币先看这一路), and now exactly full.
 
     ``config/egress-consumers.yaml``'s own note works this out as ``54 + 20 +
-    4 = 78 of 80`` using resident's *steady* load. The reserve is 60, not 54 —
-    the retry margin is part of what the ledger will admit — so the honest
-    worst case is ``60 + 20 + 4 = 84``, four over the ceiling. Nobody is wrong
-    here; the note is optimistic by exactly one retry margin, and printing the
-    stricter figure is the reason this block exists.
+    4 = 78 of 80`` using resident's *steady* load and the pre-M1-A3b hard cap
+    of 20. Neither number is what the ledger will actually admit: the reserve
+    is 60, not 54 (the retry margin is part of what the ledger admits), and
+    the hard cap is 16, not 20 — M1-A3b's fix, because 20 sat above what
+    ``our_ceiling_per_min`` (76, after M1-B's ``dev_machine`` reservation of
+    4) could ever pay out. With the corrected 16, our practical max is
+    ``60 + 16 = 76`` — which is exactly ``our_ceiling_per_min``, not a looser
+    bound above it — and the honest worst case is ``76 + 4 = 80``: precisely
+    the ceiling, with zero room, not four over it. Nobody was wrong before;
+    the stale hard cap made this block print a worse number than the true one,
+    which happened to still be safe. It is now the true one.
     """
     check = check_budget(budget, read_observations(CONSUMERS_PATH))
     block = "\n".join(_block(check.lines, FUTURES_DATA))
-    assert "合计最坏 4 + 80 = 84/min" in block
+    assert "机会硬顶 16 = 76/min" in block
+    assert "合计最坏 4 + 76 = 80/min" in block
     assert "vs 天花板 80/min" in block
-    assert "最坏情形没平" in block
+    assert "账面与实测都在天花板内（最坏 80 <= 80）" in block
 
 
 # --------------------------------------------------------------------------- #

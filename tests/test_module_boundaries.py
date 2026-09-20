@@ -29,7 +29,35 @@ synthetic sources whose violations are known, so the analyzer itself cannot rot
 into a function that always returns "clean".
 
 ruff's ``flake8-tidy-imports`` ``banned-api`` (see ``pyproject.toml``) fences
-the same rule at edit time. It is the fast check; this is the authority.
+the same rule at edit time. It is the fast check; this is the authority. It is
+not a fence in ``scripts/`` — ``pyproject.toml``'s ``per-file-ignores`` lifts
+TID251 there on purpose, for the composition root (see below) — so this file
+is the only fence that reaches that directory at all.
+
+``scripts/`` (M1-A3b)
+----------------------
+``scripts/preflight.py`` is a composition root: the one file allowed to name
+two modules (``adapters`` and ``ratelimit``/``preflight``) in the same import
+block, because it lives outside ``packages/`` and wires already-built objects
+together rather than sharing logic between modules (see its own docstring,
+and ``adapters/admission.py``'s: "collector 两个都 import，把一个传给另一个").
+That is a legitimate escape hatch from seam ③ — but only because this file's
+AST walk stopped at ``packages/``, so ``scripts/`` got a silent, unregistered
+exemption rather than a declared one. A file placed in ``scripts/`` with real
+cross-module business logic (not wiring) passed this test with 5 green
+checks, because nothing here ever looked at it.
+
+The fix is not to forbid the composition root — ``ALLOWED_EDGES`` names
+``SCRIPTS_OWNER`` explicitly and allows it to import every module, because
+that is what a composition root is for. The fix is to also scan
+``scripts/*.py`` (so the exemption is visible in this table, not a gap in
+where the scan reaches) and to add a second, narrower guard —
+:func:`wiring_violations` — that keeps the exemption to *wiring*: a
+call-through function body (one call, or ``pass``), and no function parameter
+typed with another module's object. ``test_the_wiring_guard_detects_a_probe_with_business_logic``
+proves the guard still fires, the same way
+``test_the_checker_still_detects_a_forbidden_edge`` proves the ``ALLOWED_EDGES``
+walk still fires.
 """
 
 from __future__ import annotations
@@ -41,12 +69,23 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = REPO_ROOT / "packages"
+SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 #: Pseudo-owner for files that sit directly in a distribution root
 #: (``packages/*/src/<dist>/*.py``) rather than inside a module subpackage.
 #: It is allowed to import nothing: re-exporting modules from ``hlens_core``
 #: would make ``import hlens_core`` a back door around the seam.
 ROOT_OWNER = "__root__"
+
+#: Pseudo-owner for ``scripts/*.py`` (direct children only — ``03`` §4's repo
+#: shape names this directory as shell scripts plus, since M1-A3, the
+#: preflight composition root). It is deliberately allowed to import every
+#: module in :data:`MODULES` below: that is what a composition root is for,
+#: and the docstring above explains why declaring the exemption here — instead
+#: of leaving it as a directory this scan never reached — is the whole point
+#: of M1-A3b. :func:`wiring_violations` is the second guard that keeps the
+#: exemption to wiring alone.
+SCRIPTS_OWNER = "scripts"
 
 #: The module subpackages of §4's module table. `site` and `research` are not
 #: Python packages, so they are not here.
@@ -78,6 +117,13 @@ MODULES: frozenset[str] = frozenset(
 # --------------------------------------------------------------------------- #
 ALLOWED_EDGES: dict[str, frozenset[str]] = {
     ROOT_OWNER: frozenset(),
+    # The composition root (M1-A3b): it lives outside `packages/`, wires
+    # already-built objects from two modules together, and is explicitly
+    # allowed to import ANY of them — see the module docstring and
+    # `adapters/admission.py`. Kept to wiring, not business logic, by
+    # `wiring_violations` / `test_scripts_files_are_wiring_only` below, not by
+    # narrowing this set.
+    SCRIPTS_OWNER: MODULES,
     "adapters": frozenset({"contracts"}),
     "backfill": frozenset({"contracts"}),
     "collector": frozenset({"contracts"}),
@@ -220,6 +266,14 @@ def _iter_python_files(root: Path) -> Iterator[Path]:
     yield from sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
 
 
+def _scripts_python_files() -> list[Path]:
+    """Direct children of ``scripts/`` only (``03`` §4 names no subdirectory
+    there); a composition root does not get to grow a package of its own."""
+    if not SCRIPTS_DIR.is_dir():
+        return []
+    return sorted(SCRIPTS_DIR.glob("*.py"))
+
+
 def collect_edges() -> tuple[list[ImportEdge], list[Path], set[str]]:
     """Scan the repository. Returns (edges, files scanned, modules found)."""
     roots = _distribution_roots()
@@ -242,6 +296,18 @@ def collect_edges() -> tuple[list[ImportEdge], list[Path], set[str]]:
                     path=path,
                 )
             )
+
+    for path in _scripts_python_files():
+        scanned.append(path)
+        edges.extend(
+            edges_in_source(
+                path.read_text(encoding="utf-8"),
+                owner=SCRIPTS_OWNER,
+                package_parts=[],  # scripts/*.py is standalone, not a package
+                first_party=first_party,
+                path=path,
+            )
+        )
     return edges, scanned, modules_found
 
 
@@ -260,12 +326,157 @@ def _violations(edges: list[ImportEdge]) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
+# The second guard on `scripts/`: ALLOWED_EDGES[SCRIPTS_OWNER] lets the
+# composition root import every module, so the AST walk above has nothing to
+# say about *what it does* with them. `wiring_violations` says that instead:
+# a file here may only (1) import, (2) make simple module-level assignments,
+# (3) define call-through functions — a single call (or `pass`), no parameter
+# typed with another module's object — and (4) carry one
+# `if __name__ == "__main__":` guard. That shape covers scripts/preflight.py
+# exactly and rejects the probe below, which does neither: it takes a ledger
+# and an adapter as parameters and reaches into the adapter's attribute
+# instead of just handing both, unopened, to one call.
+# --------------------------------------------------------------------------- #
+def _scripts_import_map(tree: ast.Module, first_party: frozenset[str]) -> dict[str, str]:
+    """Local name -> resolved module, for every first-party import in ``tree``."""
+    mapping: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                dotted = alias.name.split(".")
+                target = _target_module(dotted, first_party)
+                if target is not None:
+                    mapping[alias.asname or dotted[0]] = target
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            dotted = node.module.split(".") if node.module else []
+            target = _target_module(dotted, first_party)
+            if target is not None:
+                for alias in node.names:
+                    mapping[alias.asname or alias.name] = target
+    return mapping
+
+
+def _annotation_targets(annotation: ast.expr | None, import_map: dict[str, str]) -> set[str]:
+    if annotation is None:
+        return set()
+    return {
+        import_map[node.id]
+        for node in ast.walk(annotation)
+        if isinstance(node, ast.Name) and node.id in import_map
+    }
+
+
+def _param_annotations(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.expr | None]:
+    args = fn.args
+    annotations = [a.annotation for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    if args.vararg is not None:
+        annotations.append(args.vararg.annotation)
+    if args.kwarg is not None:
+        annotations.append(args.kwarg.annotation)
+    return annotations
+
+
+def _is_wiring_body(body: list[ast.stmt]) -> bool:
+    """A call-through: at most a leading docstring, then exactly one
+    statement that is ``pass``, a bare call, or ``return`` of a call (or of
+    nothing). No branching, no loop, no attribute poking — those are where
+    logic hides, and a composition root has none of its own."""
+    stmts = body
+    if (
+        stmts
+        and isinstance(stmts[0], ast.Expr)
+        and isinstance(stmts[0].value, ast.Constant)
+        and isinstance(stmts[0].value.value, str)
+    ):
+        stmts = stmts[1:]
+    if len(stmts) != 1:
+        return False
+    (stmt,) = stmts
+    if isinstance(stmt, ast.Pass):
+        return True
+    if isinstance(stmt, ast.Return):
+        return stmt.value is None or isinstance(stmt.value, ast.Call)
+    if isinstance(stmt, ast.Expr):
+        return isinstance(stmt.value, ast.Call)
+    return False
+
+
+def _is_main_guard(node: ast.stmt) -> bool:
+    if not isinstance(node, ast.If):
+        return False
+    test = node.test
+    return (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == "__name__"
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+        and isinstance(test.comparators[0], ast.Constant)
+        and test.comparators[0].value == "__main__"
+    )
+
+
+def wiring_violations(
+    source: str, *, path: Path, first_party: frozenset[str]
+) -> list[str]:
+    """Everything in ``source`` that is not wiring, as human-readable lines."""
+    tree = ast.parse(source, filename=str(path))
+    import_map = _scripts_import_map(tree, first_party)
+    problems: list[str] = []
+    where_root = path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else path
+
+    for index, node in enumerate(tree.body):
+        where = f"{where_root}:{node.lineno}"
+        if (
+            index == 0
+            and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            continue  # module docstring
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign)):
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for annotation in _param_annotations(node):
+                bad = _annotation_targets(annotation, import_map) - {"contracts"}
+                if bad:
+                    problems.append(
+                        f"{where}: {node.name}() has a parameter typed with module(s) "
+                        f"{sorted(bad)} — a composition root wires pre-built module-level "
+                        "names into one call; it does not define functions that accept "
+                        "another module's objects for further processing"
+                    )
+            if not _is_wiring_body(node.body):
+                problems.append(
+                    f"{where}: {node.name}()'s body is not a call-through (a single "
+                    "`pass`, call, or `return <call>`) — that is the shape business logic "
+                    "hides in, in a file ALLOWED_EDGES cannot narrow"
+                )
+            continue
+        if _is_main_guard(node):
+            continue
+        problems.append(
+            f"{where}: top-level {type(node).__name__} is not one of imports, simple "
+            'assignments, call-through functions, or `if __name__ == "__main__":` — the '
+            "only shapes a composition root in scripts/*.py is allowed"
+        )
+    return problems
+
+
+# --------------------------------------------------------------------------- #
 # Guards on the map itself
 # --------------------------------------------------------------------------- #
 def test_allowed_edges_map_is_well_formed() -> None:
-    assert set(ALLOWED_EDGES) == MODULES | {ROOT_OWNER}, (
+    assert set(ALLOWED_EDGES) == MODULES | {ROOT_OWNER, SCRIPTS_OWNER}, (
         "every §4 module needs a row in ALLOWED_EDGES; an empty frozenset is "
         "the default and perfectly valid answer"
+    )
+    assert ALLOWED_EDGES[SCRIPTS_OWNER] == MODULES, (
+        "the composition root is allowed to import every module on purpose "
+        "(M1-A3b) — narrow this and scripts/preflight.py stops passing; the "
+        "guard against business logic hiding in scripts/ is "
+        "test_scripts_files_are_wiring_only, not this set"
     )
     for owner, targets in ALLOWED_EDGES.items():
         unknown = targets - MODULES
@@ -283,6 +494,16 @@ def test_the_scan_actually_reaches_code() -> None:
         "the `contracts` module subpackage was not found; either the layout of "
         "§4 changed or this test is no longer looking at the code"
     )
+
+
+def test_the_scripts_scan_actually_reaches_code() -> None:
+    """The same guard as above, for the M1-A3b addition: a scan of
+    ``scripts/`` that silently finds zero files is exactly the gap this task
+    closes, reintroduced."""
+    files = _scripts_python_files()
+    assert files, f"no *.py files found directly under {SCRIPTS_DIR} — the scan is vacuous"
+    _, scanned, _ = collect_edges()
+    assert set(files) <= set(scanned), "collect_edges() is not including the scripts/ scan"
 
 
 def test_every_module_directory_is_registered() -> None:
@@ -339,4 +560,49 @@ def test_no_import_edge_outside_the_allowed_map() -> None:
         "contracts, never by importing each other (03-ARCHITECTURE.md §2 seam "
         "③). If the dependency is genuinely required, add it to ALLOWED_EDGES "
         "in this file with a reason."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The wiring-only guard on scripts/, in force
+# --------------------------------------------------------------------------- #
+def test_the_wiring_guard_still_detects_a_probe_with_business_logic() -> None:
+    """Mirrors ``test_the_checker_still_detects_a_forbidden_edge``: the
+    analyzer must report violations it is shown, so it cannot rot into a
+    function that always returns "clean". The probe is the maintainer's own
+    (M1-A3b task body, verbatim) — a function that takes a ledger and an
+    adapter and reaches into the adapter's cost table, exactly the shape
+    ``ALLOWED_EDGES`` cannot see because it is business logic, not an import
+    edge."""
+    probe_source = (
+        "# scripts/_probe.py\n"
+        "from hlens_core.ratelimit import RateLimitLedger\n"
+        "from hlens_core.adapters.binance.adapter import BinanceAdapter\n"
+        "\n"
+        "def sneaky(l: RateLimitLedger, a: BinanceAdapter) -> None:\n"
+        "    a.cost_of  # noqa\n"
+    )
+    roots = _distribution_roots()
+    first_party = frozenset(root.name for root in roots)
+    problems = wiring_violations(
+        probe_source, path=SCRIPTS_DIR / "_probe.py", first_party=first_party
+    )
+    assert problems, "the wiring-only guard failed to flag the maintainer's own probe"
+
+
+def test_scripts_files_are_wiring_only() -> None:
+    roots = _distribution_roots()
+    first_party = frozenset(root.name for root in roots)
+    problems: list[str] = []
+    for path in _scripts_python_files():
+        problems.extend(
+            wiring_violations(
+                path.read_text(encoding="utf-8"), path=path, first_party=first_party
+            )
+        )
+    assert not problems, (
+        "scripts/*.py must be wiring only — the composition root (03 §2 seam ③, "
+        "adapters/admission.py's docstring) builds objects and hands them to one "
+        "call; it does not contain business logic ALLOWED_EDGES cannot narrow:\n"
+        + "\n".join(f"  {problem}" for problem in problems)
     )

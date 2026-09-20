@@ -157,9 +157,25 @@ venues:
           source: derived
           doc: "03 §6 车道表：本桶上没有快道"
         opportunistic_hard_cap_per_min:
-          value: 20
+          # M1-A3b: was 20, matching 03 §6.1's table at the time it was
+          # written — but that table assumed our_ceiling_per_min == the
+          # venue's egress_ceiling_per_min (80) with nothing reserved for
+          # another consumer. M1-B then added `dev_machine`'s
+          # `futures_data.reserved_per_min: 4` to config/egress-consumers.yaml
+          # (a resident single-symbol dev collector that really does call
+          # /futures/data/*), so at runtime our_ceiling_per_min = 80 − 4 = 76,
+          # and the ledger already clamps opportunistic_available() to
+          # min(hard_cap, formula) — so this was never a safety hole, only a
+          # number that lied: the formula result is 76 − max(60,54) = 16, not
+          # 20, and 20 was unreachable.
+          #
+          # This value MOVES with dev_machine's reserved_per_min: change that
+          # 4 and recompute 80 − new_reserve − max(60,54), or run
+          # test_binance_futures_data_opportunistic_hard_cap_matches_formula
+          # (tests/test_ratelimit_config.py) to check it.
+          value: 16
           source: derived
-          doc: "03 §6.1 表：硬顶 20 —— 它现在等于算式结果 80 − max(60,54)"
+          doc: "03 §6.1 表：硬顶 = 算式结果 = our_ceiling − max(reserve, resident_steady) = (80 − 4) − max(60,54) = 76 − 60 = 16。80 是本桶 egress_ceiling_per_min；4 是 config/egress-consumers.yaml 里 dev_machine 对 futures_data 的预留（M1-B 实测）；60/54 未变。这个 16 跟着 dev_machine 那 4 走，4 一变这里要重算。"
         capacity_model:
           fixed_per_min:
             value: 0
