@@ -163,6 +163,64 @@ venues:
             source: derived
             doc: "03 §6：每增一个币 = 3 类 × 1 次/10 分钟 = 0.3 次/分"
 
+      # `fundingRate` / `fundingInfo` — its own request-count bucket, per 04
+      # §2/§4: "两者是否同一个桶官方未说明 → `未验证`（§11 第 10 项）". Modelled
+      # as an INDEPENDENT bucket from `futures_data` on purpose (M1-A2b): both
+      # official pages give their own limit with no cross-reference, and the
+      # conservative reading of an unstated relationship is "separate accounts",
+      # not "shared, so double what either page says". If M1-G's on-machine
+      # fixture recording (§11 item 10) observes them sharing one counter, this
+      # bucket collapses into `futures_data` and this comment is deleted then —
+      # not guessed now.
+      funding_rate:
+        kind: request
+        official_limit_per_min:
+          value: 100
+          source: official
+          doc: "04 §2/§4：fundingRate/fundingInfo 共用独立请求桶 500 次/5min/IP = 100 次/分（官方）"
+        share:
+          value: 0.40
+          source: derived
+          doc: "04 开头硬规则 ②"
+        egress_ceiling_per_min:
+          value: 40
+          source: derived
+          doc: "04 §4 表：500 次/5min 的 40% 红线 = 40 次/分（100 × 40%）"
+        resident_steady_per_min:
+          value: 1
+          source: derived
+          doc: >-
+            03 §6 车道表「1 h / 8 h / 冷启动」行：fundingRate 每 8h 对账一次 +
+            fundingInfo 每 1h 一次 + 冷启动一次性调用，合计「~1」次/分；04 §4
+            原文写「<1 次/分」。本桶的 loader（config.py `_int_constant`）只
+            接受整数，且 reserve 必须 ≥ 本字段（不得低估稳态占用），所以把
+            <1 向上取整记为 1 —— 这是本任务唯一一次「拍脑袋」式取整，理由是
+            整数化本身，取整方向（向上）不是任意选的。
+        reserve_per_min:
+          value: 2
+          source: derived
+          doc: >-
+            套用 `futures_data` 桶（同为 request 桶，同样自愈：fundingRate 的
+            `limit≤1000` 覆盖全部历史、fundingInfo 覆盖全部非默认周期币，漏一
+            次下次照样能补全，不需要抢在本分钟内重试）的公式
+            reserve = resident_steady + ceil(resident_steady × 11%)：
+            ceil(1 × 0.11) = 1 → reserve = 1 + 1 = 2。
+        fast_lane_floor_per_min:
+          # Same reasoning as `futures_data`: nothing on this bucket runs on
+          # the ≤60s fast lane (03 §6 车道表：本桶只出现在 1h/8h/冷启动行）。
+          value: 0
+          source: derived
+          doc: "03 §6 车道表：本桶（同 futures_data）上没有快道"
+        opportunistic_hard_cap_per_min:
+          value: 38
+          source: derived
+          doc: >-
+            03 §6.1 公式（评审修正版）：available = ceiling − max(reserve,
+            resident 实际用量) = 40 − max(2, 1) = 38。跟随 `futures_data` 的
+            先例，硬顶直接等于算式结果，不像 Binance 权重桶那样额外压低留退避
+            余量 —— 这一桶的量级（个位数/分）本身就远低于天花板，没有需要额外
+            压低的理由。
+
     ws:
       # All three come from the pre-split WebSocket documentation. 04 §2 says
       # in as many words that whether they survived the 2026-04-23 endpoint

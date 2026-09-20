@@ -451,7 +451,7 @@ def test_a_418_emits_an_ip_ban_event_that_demands_an_f4_message(
     assert event.notify_f4 is True
     assert event.ops_event is True
     assert event.detail["retry_after_s"] == 7_200
-    assert event.detail["halted_lanes"] == 2  # both Binance buckets
+    assert event.detail["halted_lanes"] == 3  # all three Binance buckets
 
 
 def test_a_418_without_a_retry_after_assumes_the_longest_documented_ban(
