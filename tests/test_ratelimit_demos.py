@@ -120,13 +120,13 @@ def test_demo_two_retiring_the_legacy_collector_reclaims_1080(
     """DEMO 2 — §6.1 退役回收流程 step ③: 确认 HL 可用预算变成 1080/分."""
     ledger = RateLimitLedger(config, clock=clock)
 
-    print("\n=== DEMO 2: hub_legacy's Hyperliquid reservation 960 -> 0 ===")
+    print("\n=== DEMO 2: hub_legacy's Hyperliquid reservation 953 -> 0 ===")
     print("before (config/egress-consumers.yaml as committed):")
     for snapshot in ledger.snapshots():
         print(_budget_line(snapshot))
     before = ledger.snapshot(HL_WEIGHT)
-    assert before.our_ceiling_per_min == 120
-    assert before.reserved_per_min == 960
+    assert before.our_ceiling_per_min == 127
+    assert before.reserved_per_min == 953
 
     path = tmp_path / "egress-consumers.yaml"
     path.write_text(reclaimed_consumers_yaml(), encoding="utf-8")

@@ -371,7 +371,10 @@ venues:
           source: derived
           doc: "03 §6.1 表第 3 行「M1+M2 实际用量 44/分」"
         # This bucket has two budget profiles because §6.1 gives it two rows:
-        # one for the transition (hub_legacy still reserving 960 → we get 120)
+        # one for the transition (hub_legacy measured at 953 → we get 127; the
+        # 960/120 split this line used to quote was M1-A2's placeholder, and
+        # M1-B's measurement landed close enough to it to leave the shape of
+        # the transitional profile intact — see that task's report)
         # and one for after the legacy collector is retired (we get all 1080).
         # The loader picks the profile with the largest `min_our_ceiling_per_min`
         # that is <= our computed ceiling, so step ③ of §6.1's reclamation

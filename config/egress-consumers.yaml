@@ -23,126 +23,246 @@
 #
 # The failure mode this file exists to prevent, in §6.1's own words: "它对不上
 # 现实时，错的方式是「我们以为有 960 权重其实没有」".
+#
+# --------------------------------------------------------------------------- #
+# M1-B (2026-09-20) MEASURED THE TOPOLOGY. It is not what §6.1 assumed.
+#
+# §6.1 pictured ONE other consumer on the production egress: a Hyperliquid
+# collector that does not touch Binance. Measured, there are TWO, and the
+# Binance traffic belongs to the other one:
+#
+#   * the Hyperliquid collector runs on the production host itself. It is
+#     REST-only against /info, and it really does never call Binance — so
+#     §6.1's assertion is literally true FOR THIS CONSUMER. Its own control
+#     plane meters per egress IP and hands us its ledger directly.
+#   * the development machine leaves through the SAME public egress IP, and
+#     it runs a resident single-symbol BINANCE futures collector, 24/7. §6.1's
+#     last bullet says "dev 的 live 预算为 0". That is the assertion that was
+#     false, and it was false in the direction §6.1 named as dangerous.
+#
+# The Hyperliquid collector's other worker nodes sit behind their own separate
+# public egress IPs and are accounted nowhere in this file on purpose: they do
+# not spend our budget. Only the workers on OUR egress do.
+#
+# Full evidence, per number, in docs/reports/2026-09-20-m1b-hub-inventory.md.
+# --------------------------------------------------------------------------- #
 
 schema: 1
 
 consumers:
 
   # ------------------------------------------------------------------ #
-  # The older Hyperliquid collector, still running on the production host.
-  # It is not ours, it will be retired, and until then it spends first.
+  # The Hyperliquid collector on the production host. It is not ours, it
+  # will be retired, and until then it spends first — and it spends a lot.
   # ------------------------------------------------------------------ #
   - name: hub_legacy
     role: >-
-      The pre-existing Hyperliquid wallet/market collector on the production
-      host. Not part of this project; retires during M5 (03 §15).
+      The pre-existing Hyperliquid wallet/market collector running on the
+      production host. MEASURED 2026-09-20 (M1-B): REST-only against /info,
+      no WebSocket, no Binance. Not part of this project; retirement date
+      still unknown (03 §18 第 4 条 — 待 raphael 回答).
     venues:
 
       binance:
+        # Still 0 — and now measured rather than remembered. The two packages
+        # that make up the running collector contain zero occurrences of the
+        # string "binance". The one Binance file in that repository is a
+        # hand-run tool that downloads monthly zips from the STATIC data-dump
+        # host, which has no API key, no REQUEST_WEIGHT header and no share of
+        # any bucket below.
+        #
+        # That tool is also the answer to 04 §4's suspicion. 04 §4 said
+        # "`01-PRODUCT.md §6` 的 hub `funding`/`kline` 表标注「多所」，**提示
+        # hub 很可能也打 Binance**". It does hold Binance klines — it just did
+        # not get them from the rate-limited API.
         fapi_weight:
           reserved_per_min: 0
-          source: unverified
-          # This zero is the assertion §6.1 demands. It is NOT "we left it
-          # blank": if the legacy collector ever starts calling Binance, our
-          # 960/min ceiling is wrong by however much it takes, and the first
-          # symptom is a 429 that escalates to a 418 banning the whole host.
+          source: measured
           assertion: >-
-            hub_legacy collects Hyperliquid only and never calls Binance
-            (03 §6.1 表第 1 行).
+            The Hyperliquid collector on the production host issues no Binance
+            API request: its two runtime packages contain no Binance endpoint,
+            host or client, and its only Binance data arrives as file
+            downloads from the static data-dump host, which charges no bucket.
           checked_by: preflight_each_start
-          doc: "03 §6.1 表第 1 行「旧采集器只采 Hyperliquid，不碰 Binance」"
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §B"
         futures_data:
           reserved_per_min: 0
-          source: unverified
+          source: measured
           assertion: >-
-            hub_legacy collects Hyperliquid only and never calls
-            /futures/data/* (03 §6.1 表第 2 行).
+            Same measurement as fapi_weight above: no /futures/data/* call
+            exists anywhere in the running collector.
           checked_by: preflight_each_start
-          doc: "03 §6.1 表第 2 行：留给 hub 旧采集器 0"
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §B"
         funding_rate:
           reserved_per_min: 0
-          source: unverified
+          source: measured
           assertion: >-
-            hub_legacy collects Hyperliquid only and never calls Binance's
-            fundingRate/fundingInfo endpoints (same "只采 Hyperliquid" claim
-            as the other two Binance buckets above).
+            Same measurement as fapi_weight above: no fundingRate/fundingInfo
+            call exists anywhere in the running collector.
           checked_by: preflight_each_start
-          doc: "M1-A2b：新增桶，沿用 03 §6.1 表第 1/2 行同一条断言"
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §B"
 
       hyperliquid:
         info_weight:
-          # 960, not 1080: 960 + 120 = 1080 = the 90 % egress ceiling, which
-          # leaves 120 weight/min of backoff headroom for the WHOLE egress IP.
-          # Writing 1080 + 120 = 1200 would push the egress to 100 % of the
-          # official limit — that is the 429 -> 418 path (03 §20, review fix 1).
+          # The placeholder here was 960, chosen so that 960 + 120 = 1080 = the
+          # 90 % egress ceiling, leaving 120 weight/min of backoff headroom for
+          # the WHOLE egress IP (03 §20, review fix 1). §6.1 was candid that it
+          # was a guess: the claim "hub 已把 HL 预算打到接近 100%" traced back to
+          # a circular reference with no source.
           #
-          # It is a conservative PLACEHOLDER, not a measurement. The claim that
-          # "hub already spends nearly 100 % of the HL budget" turned out to be
-          # a circular reference with no source (03 §6.1). Until M1-B measures
-          # it, we assume the legacy collector may be using almost all of it.
-          reserved_per_min: 960
-          source: unverified
+          # M1-B measured it. The guess was close, and it was close on the
+          # optimistic side, not the conservative one.
+          #
+          # HOW IT WAS MEASURED, and how far that goes: the collector's own
+          # control plane meters per egress IP and keeps a sliding 60-second
+          # weight sum per IP. 953 is the p95 of that value over 28 samples
+          # across 29 minutes on 2026-09-20 — NOT the three-window p95 that
+          # 04 §11 第 12 項 asks for. The control plane exposes only the current
+          # value, its history table is not reachable, and nobody had SSH on
+          # that host. So it is a LOWER BOUND, tagged `样本不足` in the report,
+          # and the window contained an active backfill but NO high-volatility
+          # market episode — the window that would push it highest.
+          #
+          # TWO NUMBERS THAT MATTER MORE THAN THIS p95, both measured in the
+          # same window:
+          #
+          #   * the observed MAXIMUM was 1147/min — ABOVE our entire 1080
+          #     egress ceiling, in a single minute, from this one consumer.
+          #     It is not written here because a reservation over the ceiling
+          #     refuses to load, and rightly: there is no split of this bucket
+          #     that is safe by arithmetic when one party alone can exceed it.
+          #   * that collector gives ITSELF 1200 weight/min per egress IP and
+          #     does not know we exist. 1200 is the full official limit.
+          #
+          # So this reservation records what it spends at p95. It does not
+          # bound what it may spend, and 1 sample in 28 already broke the
+          # ceiling. Capping the other collector is raphael's call and is the
+          # real fix — see the report's §A and §F.
+          # M1-B-MEASURED-HL-RESERVATION
+          reserved_per_min: 953
+          source: measured
           note: >-
-            Conservative placeholder. M1-B replaces it with a measured value,
-            read from the legacy collector's OWN ledger and logs — never by
-            probing the exchange, which would spend the budget we are trying to
-            protect (03 §6.1). Then re-run preflight; M5's gating conclusion is
-            recomputed from the new number.
-          doc: "03 §6.1 表第 3 行 + §20 评审修正第 1 行"
-        # Seats, unlike weight, are indivisible and zero-sum (04 §4). How many
-        # the legacy collector holds is unknown; §6.1 row 4 says "上机第一件事
-        # 就是数". `null` means exactly that: unknown, not zero. The ledger
-        # refuses to pretend it can subtract an unknown and flags the bucket.
+            p95 of the collector's own per-egress-IP sliding weight counter,
+            28 samples over 29 minutes, 2026-09-20. Lower bound, sample-limited,
+            no high-volatility window covered. Observed max in the same window
+            was 1147/min, above our whole 1080 ceiling; its self-configured cap
+            is 1200/min.
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §A"
+        # Seats, unlike weight, are indivisible and zero-sum (04 §4). §6.1 row 4
+        # said "上机第一件事就是数", so M1-B counted: the collector is pure REST
+        # against /info — no WebSocket client exists anywhere in its two runtime
+        # packages — so it holds no seats at all. These are a counted 0, not the
+        # `null` (unknown) they used to be, and the ledger may subtract them.
         ws_seats:
           connections:
-            reserved: null
-            source: unverified
-            doc: "03 §6.1 表第 4 行：旧采集器已占的连接数未验证"
+            reserved: 0
+            source: measured
+            doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §D"
           distinct_users:
-            reserved: null
-            source: unverified
-            doc: "03 §6.1 表第 4 行：user 席位是零和的，M5 上线前必须对账"
+            reserved: 0
+            source: measured
+            doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §D"
 
   # ------------------------------------------------------------------ #
-  # The development machine. Same egress as production (03 §8).
+  # The development machine. Same egress as production (03 §8) — M1-B
+  # confirmed that by reading the public egress IP from both ends and
+  # getting the same answer.
+  #
+  # §6.1's last bullet reads "dev 的 live 预算为 0：不再只是「别挤 hub」，而是
+  # 「别挤生产自己」". That sentence describes what dev's *tests* do, and it
+  # was carried into this file as though it described the whole machine.
+  # It does not: a resident Binance futures collector has been running on
+  # this machine continuously, on this egress, since before the freeze. It
+  # is not part of this project and not under our control, so it is a
+  # consumer like any other and is accounted here like any other.
   # ------------------------------------------------------------------ #
   - name: dev_machine
     role: >-
       raphael's development machine. It leaves this egress through the same
       public IP as production, so it is a consumer whether or not it is
-      collecting (03 §8).
+      collecting (03 §8). MEASURED 2026-09-20 (M1-B): it runs a resident
+      single-symbol Binance USDⓈ-M futures collector that is NOT this
+      project's, and that collector — not the Hyperliquid one — is the
+      Binance traffic 04 §4 suspected was on this egress.
     venues:
 
       binance:
+        # Measured from the collector's OWN on-disk output, which records one
+        # row per successful poll, over 13,624 collected minutes spanning
+        # 2026-09-02..20. Per minute, at its steady state:
+        #   /fapi/v1/openInterest?symbol=<one>   W=1  x 1/min = 1
+        #   /fapi/v1/premiumIndex?symbol=<one>   W=1  x 1/min = 1
+        #   /fapi/v1/depth?limit=1000            W=20 per order-book resync
+        # The resyncs are the whole spread: 0 in a quiet minute, 6 in the
+        # worst minute observed (122 weight/min).
+        #
+        # §11 第 12 項's rule is "三档窗口各测一次…取 p95 作为记账值". The three
+        # windows gave p95 = 2 (daily), 2 (its backfill running — that
+        # backfill is file downloads from the static data-dump host and costs
+        # this bucket nothing) and 42 (its worst reconnect-churn day). The
+        # accounted value is the largest of the three.
         fapi_weight:
-          reserved_per_min: 0
-          source: derived
-          assertion: >-
-            dev's live budget is 0 (03 §6.1 last bullet: "dev 的 live 预算为
-            0"). Offline tests use recorded fixtures; live tests are marked
-            @pytest.mark.live and skipped by default (AGENTS §2).
-          checked_by: pytest_addopts_not_live
-          doc: "03 §6.1 最后一条 + 03 §8"
+          reserved_per_min: 42
+          source: measured
+          note: >-
+            Steady state is 2/min; 42 is the p95 of the worst of the three
+            measured windows; 122/min is the highest single minute observed.
+            Our own resident load is 241/min, so 241 + 42 = 283 of a 960
+            ceiling: this correction costs us nothing today. It is carried
+            because a 0 here was a false claim, not because it hurts.
+          checked_by: preflight_each_start
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"
         futures_data:
-          reserved_per_min: 0
-          source: derived
-          assertion: >-
-            dev's live budget is 0; see above.
-          checked_by: pytest_addopts_not_live
-          doc: "03 §6.1 最后一条"
+          # Four /futures/data/* ratio endpoints fired concurrently once per
+          # 300 s for one symbol: 0 requests in four minutes out of five, 4 in
+          # the fifth. p95 = 4, max = 4, mean 0.68.
+          reserved_per_min: 4
+          source: measured
+          note: >-
+            This is the bucket that actually tightens. Ours is the tightest
+            bucket we have (§6: "想加币先看这一路") and it just lost 4 次/分:
+            54 resident + 20 opportunistic cap = 74, plus this 4 = 78 of 80.
+          checked_by: preflight_each_start
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"
         funding_rate:
+          # This one is genuinely 0, measured: the dev collector reads funding
+          # through /fapi/v1/premiumIndex (charged to fapi_weight above), and
+          # its historical funding backfill is a static file download. The
+          # strings fundingRate and fundingInfo appear nowhere in its source.
           reserved_per_min: 0
-          source: derived
+          source: measured
           assertion: >-
-            dev's live budget is 0; see above.
-          checked_by: pytest_addopts_not_live
-          doc: "03 §6.1 最后一条"
+            The Binance collector on the development machine never calls
+            /fapi/v1/fundingRate or /fapi/v1/fundingInfo: its live funding
+            lane is /fapi/v1/premiumIndex and its historical funding backfill
+            downloads static zips, which charge no API bucket.
+          checked_by: preflight_each_start
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"
+
+      # NOT ACCOUNTED HERE, and deliberately named so it is not forgotten:
+      # this machine also runs an on-demand Binance MCP server that calls the
+      # SPOT host (api.binance.com), not the futures host. M1-B could not put
+      # a number on it — it fires only when an agent asks it something and it
+      # keeps no ledger — and there is no spot bucket in venues.yaml to put a
+      # number into: 04 §9.3 documents spot as a separate host with its own
+      # 6000/min REQUEST_WEIGHT, and 04 §12 hands that bucket to M4.
+      #
+      # Whether it can hurt the three buckets above is exactly 04 §11 第 7 項,
+      # still `未验证`: the two products document different limits and separate
+      # X-MBX-USED-WEIGHT-* headers, but Binance never says whether one IP
+      # counter is shared across them. Same egress IP is certain; same counter
+      # is not known. Settle it with §11 第 7 項's probe before M4, not by
+      # guessing a reservation here.
 
       hyperliquid:
         info_weight:
           reserved_per_min: 0
-          source: derived
+          source: measured
           assertion: >-
-            dev's live budget is 0; see above.
+            Nothing on the development machine calls Hyperliquid: the resident
+            collector there is Binance-only, the on-demand MCP server above
+            talks to Binance spot, and this project's own live tests are marked
+            @pytest.mark.live and deselected by default (AGENTS §2), which is
+            what 03 §6.1's "dev 的 live 预算为 0" actually covers.
           checked_by: pytest_addopts_not_live
-          doc: "03 §6.1 最后一条"
+          doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"

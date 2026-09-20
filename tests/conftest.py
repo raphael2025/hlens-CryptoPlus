@@ -4,6 +4,7 @@ moves when a test moves it."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,26 +17,56 @@ VENUES_PATH = REPO_ROOT / "config" / "venues.yaml"
 CONSUMERS_PATH = REPO_ROOT / "config" / "egress-consumers.yaml"
 
 
+#: Marks ``hub_legacy``'s Hyperliquid reservation in
+#: ``config/egress-consumers.yaml``. Until M1-B that reservation was the
+#: literal 960 placeholder and these helpers matched on the digits; now it is a
+#: measured value that will be re-measured (04 §11 第 14 項 asks for another
+#: pass a week before retirement and 24 h after), so the tests anchor on a
+#: marker that survives the number changing instead.
+HL_RESERVATION_MARKER = "# M1-B-MEASURED-HL-RESERVATION"
+
+_HL_RESERVATION_RE = re.compile(
+    re.escape(HL_RESERVATION_MARKER) + r"\n(?P<indent>[ ]*)reserved_per_min: \d+"
+)
+
+
+def set_hl_reservation(text: str | None, body: str) -> str:
+    """Rewrite ``hub_legacy``'s Hyperliquid reservation to ``body``.
+
+    ``body`` is the YAML that replaces the ``reserved_per_min:`` line, given
+    without indentation; each line is indented to match the file. Returning
+    text rather than a patched object keeps the test honest: it goes back
+    through the real loader, including the rule that a reservation of 0 must
+    carry its assertion.
+    """
+    source = CONSUMERS_PATH.read_text(encoding="utf-8") if text is None else text
+    match = _HL_RESERVATION_RE.search(source)
+    if match is None:
+        raise AssertionError(
+            f"{HL_RESERVATION_MARKER} is not where these helpers expect it in "
+            "config/egress-consumers.yaml; update this helper and the M1-B report"
+        )
+    indent = match.group("indent")
+    replacement = HL_RESERVATION_MARKER + "\n" + "\n".join(
+        indent + line if line else "" for line in body.splitlines()
+    )
+    return source[: match.start()] + replacement + source[match.end() :]
+
+
 def reclaimed_consumers_yaml(text: str | None = None) -> str:
     """Step ② of §6.1's reclamation procedure, applied to the file's text.
 
     "`venues.yaml` 里 `reserved.hyperliquid.hub_legacy` 由 960 改 0" — the
     reservations moved to `config/egress-consumers.yaml` when that file was
-    split out, but the step is the same one. Returning text rather than a
-    patched object keeps the test honest: it goes through the real loader,
-    including the rule that a reservation of 0 must carry its assertion.
+    split out, but the step is the same one, and it is still one number.
     """
-    source = CONSUMERS_PATH.read_text(encoding="utf-8") if text is None else text
-    if "reserved_per_min: 960" not in source:
-        raise AssertionError("the 960 placeholder is gone; update this helper and §6.1")
-    return source.replace(
-        "reserved_per_min: 960",
+    return set_hl_reservation(
+        text,
         "reserved_per_min: 0\n"
-        "          assertion: >-\n"
-        "            hub_legacy has been stopped and cannot be restarted\n"
-        "            (03 §6.1 retirement step 1).\n"
-        "          checked_by: preflight_each_start",
-        1,
+        "assertion: >-\n"
+        "  hub_legacy has been stopped and cannot be restarted\n"
+        "  (03 §6.1 retirement step 1).\n"
+        "checked_by: preflight_each_start",
     )
 
 

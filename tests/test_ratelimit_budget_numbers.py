@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import reclaimed_consumers_yaml
-from hlens_core.ratelimit import BucketKind, BurstShaper, LedgerConfig
+from conftest import reclaimed_consumers_yaml, set_hl_reservation
+from hlens_core.ratelimit import BucketKind, BurstShaper, ConfigError, LedgerConfig
 
 BINANCE_WEIGHT = "binance:fapi_weight"
 FUTURES_DATA = "binance:futures_data"
@@ -147,23 +147,41 @@ def test_full_opportunistic_on_both_buckets_still_fits_in_80_if_they_share_a_cou
     IP that overshoot is a 429 -> 418 that bans the whole machine, taking the
     still-running legacy collector down with it. This test is the ledger-side
     guardrail until M1-G's on-machine fixture recording settles the question.
+
+    M1-B (2026-09-20) made it bind for real, and found a hole in it while
+    doing so: the sum below used to leave out the OTHER consumers on this
+    egress entirely, so it would have gone on passing while the egress went
+    over. It now counts them. The development machine's Binance collector was
+    measured at 4 requests/min of this bucket, and adding a fifth term to a
+    sum that already came to exactly 80 would have made it 84.
+
+    It does not, and the reason is worth pinning: ``opportunistic_available``
+    is ``min(formula, hard cap)``, and the formula shrinks when someone
+    else's reservation shrinks our ceiling. Our opportunistic lane gave up
+    exactly the 4 the other consumer took (20 -> 16), which is what §6.1's
+    formula is for. The sum is still 80 — with no slack left at all, and with
+    the hard cap of 20 no longer the thing that binds.
     """
     futures_data = config.bucket(FUTURES_DATA)
     funding_rate = config.bucket(FUNDING_RATE)
+    others = config.consumers.reserved_per_min(futures_data.key)
 
     combined_full_opportunistic = (
         futures_data.resident_steady_per_min
-        + futures_data.opportunistic_hard_cap_per_min
+        + futures_data.opportunistic_available(futures_data.resident_steady_per_min)
         + funding_rate.resident_steady_per_min
-        + funding_rate.opportunistic_hard_cap_per_min
+        + funding_rate.opportunistic_available(funding_rate.resident_steady_per_min)
+        + others
     )
 
-    # Pin the inputs so this test cannot pass by two unrelated numbers
-    # happening to still add up: it must be exercising 54, 20, 1 and 5.
+    # Pin the inputs so this test cannot pass by unrelated numbers happening
+    # to still add up: it must be exercising 54, 16, 1, 5 and the measured 4.
     assert futures_data.resident_steady_per_min == 54
-    assert futures_data.opportunistic_hard_cap_per_min == 20
+    assert futures_data.opportunistic_hard_cap_per_min == 20  # no longer binding
+    assert futures_data.opportunistic_available(54) == 16  # the formula binds
     assert funding_rate.resident_steady_per_min == 1
-    assert funding_rate.opportunistic_hard_cap_per_min == 5
+    assert funding_rate.opportunistic_available(1) == 5
+    assert others == 4  # M1-B measured; this term used to be missing entirely
 
     assert combined_full_opportunistic == 80
     assert combined_full_opportunistic <= futures_data.egress_ceiling_per_min
@@ -174,16 +192,51 @@ def test_full_opportunistic_on_both_buckets_still_fits_in_80_if_they_share_a_cou
 # §6.1 — the deduction, and the invariant the review added
 # --------------------------------------------------------------------------- #
 def test_hyperliquid_reserved_plus_ours_equals_the_ceiling(config: LedgerConfig) -> None:
-    """§6.1 row 3: **960 + 120 = 1080 = 天花板 ✓**.
+    """§6.1 row 3 guessed **960 + 120**. M1-B measured **950 + 130**.
 
     §20 review fix 1: the placeholder was 1080 and made 1080 + 120 = 1200 =
     100 % of the official limit, leaving the whole egress no backoff headroom.
+    The invariant is the sum, and it still holds.
+
+    The 960 was flagged in §6.1 as a guess resting on a circular reference.
+    Measured on 2026-09-20 from the legacy collector's own per-egress-IP
+    weight counter, the guess was good — and good on the OPTIMISTIC side:
+    see ``test_the_legacy_collectors_own_cap_exceeds_our_whole_ceiling`` just
+    below for the number that actually matters.
     """
     bucket = config.bucket(HL_WEIGHT)
-    assert bucket.reserved_per_min == 960
-    assert bucket.our_ceiling_per_min == 120
+    assert bucket.reserved_per_min == 953
+    assert bucket.our_ceiling_per_min == 127
     assert bucket.reserved_per_min + bucket.our_ceiling_per_min == 1080
     assert bucket.reserved_per_min + bucket.our_ceiling_per_min == bucket.egress_ceiling_per_min
+
+
+def test_the_legacy_collectors_own_cap_exceeds_our_whole_ceiling(
+    config: LedgerConfig, venues_path: Path, tmp_path: Path
+) -> None:
+    """M1-B's most load-bearing finding, pinned so it cannot be forgotten.
+
+    The 950 above is what that collector SPENDS. What it is ALLOWED to spend,
+    by its own configuration, is 1200 weight/min per egress IP — the full
+    official Hyperliquid limit — and it has no idea this project exists.
+
+    1200 > 1080. One consumer's self-granted cap is larger than our entire
+    egress ceiling, so there is no split of this bucket that is safe by
+    arithmetic alone; what keeps us inside the line today is only that it
+    happens not to be running flat out. The loader refuses that configuration
+    rather than resolving it to a negative budget, which is the correct
+    behaviour and also the reason this cannot be fixed on our side: capping
+    the other collector is raphael's call (report §A, §G).
+    """
+    assert config.bucket(HL_WEIGHT).egress_ceiling_per_min == 1080 < 1200
+
+    path = tmp_path / "egress-consumers.yaml"
+    path.write_text(
+        set_hl_reservation(None, "reserved_per_min: 1200\nsource: measured"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="over the line"):
+        LedgerConfig.load(venues_path, path)
 
 
 @pytest.mark.parametrize("key", [BINANCE_WEIGHT, FUTURES_DATA, HL_WEIGHT])
@@ -196,26 +249,55 @@ def test_reservations_land_inside_the_egress_total_not_the_official_limit(
     assert bucket.egress_ceiling_per_min < bucket.official_limit_per_min
 
 
-def test_the_legacy_collector_reserves_nothing_on_binance_and_says_so(
+def test_the_binance_traffic_on_this_egress_is_the_dev_machines_not_the_legacy_collectors(
     config: LedgerConfig,
 ) -> None:
-    """§6.1: 「旧采集器不碰 Binance」必须被断言，不能靠记忆.
+    """F-12, closed by M1-B on 2026-09-20. Both frozen documents were half right.
 
-    The zero is not an omission and not a default: it is an assertion carried
-    in ``config/egress-consumers.yaml`` with the claim and its re-checker.
+    §6.1 asserted "旧采集器只采 Hyperliquid，**不碰 Binance**" and reserved 0
+    on that basis. `04 §4` called that `未验证` and warned that `01 §6`'s hub
+    `funding`/`kline` tables are marked 「多所」, which "提示 hub 很可能也打
+    Binance". Measured:
+
+    * §6.1 is right **about the Hyperliquid collector**. It issues no Binance
+      request at all — the Binance klines `01 §6` lists were downloaded from
+      the static data-dump host by a hand-run tool, which charges no bucket.
+      That is what reconciles the two documents.
+    * §6.1 is wrong **about the egress**, because it only counted one other
+      consumer. The development machine leaves through the same public IP and
+      runs a resident Binance futures collector around the clock. §6.1's
+      "dev 的 live 预算为 0" was read as covering that machine; it covers our
+      own live tests, which are deselected by default, and nothing else.
+
+    So the Binance zero was false — just not on the row anybody was watching.
     """
-    reservations = {
+    weight_by_consumer = {
         reservation.consumer: reservation
-        for reservation in config.consumers.for_bucket(
-            config.bucket(BINANCE_WEIGHT).key
-        )
+        for reservation in config.consumers.for_bucket(config.bucket(BINANCE_WEIGHT).key)
     }
-    legacy = reservations["hub_legacy"]
+    request_by_consumer = {
+        reservation.consumer: reservation
+        for reservation in config.consumers.for_bucket(config.bucket(FUTURES_DATA).key)
+    }
+
+    # The Hyperliquid collector: still zero, now measured rather than recalled.
+    legacy = weight_by_consumer["hub_legacy"]
     assert legacy.reserved_per_min == 0
-    assert legacy.assertion is not None and "never calls Binance" in legacy.assertion
+    assert legacy.source.value == "measured"
+    assert legacy.assertion is not None and "no Binance API request" in legacy.assertion
     assert legacy.checked_by == "preflight_each_start"
-    assert config.bucket(BINANCE_WEIGHT).our_ceiling_per_min == 960
-    assert config.bucket(FUTURES_DATA).our_ceiling_per_min == 80
+    assert request_by_consumer["hub_legacy"].reserved_per_min == 0
+
+    # The development machine: not zero, and the reason F-12 existed.
+    dev = weight_by_consumer["dev_machine"]
+    assert dev.reserved_per_min == 42
+    assert dev.source.value == "measured"
+    assert request_by_consumer["dev_machine"].reserved_per_min == 4
+
+    # What the deduction costs us, as preflight must print it.
+    assert config.bucket(BINANCE_WEIGHT).our_ceiling_per_min == 960 - 42 == 918
+    assert config.bucket(FUTURES_DATA).our_ceiling_per_min == 80 - 4 == 76
+    assert config.bucket(FUNDING_RATE).our_ceiling_per_min == 40
 
 
 # --------------------------------------------------------------------------- #
@@ -238,10 +320,15 @@ def test_futures_data_resident_steady_is_54(config: LedgerConfig) -> None:
 
 
 def test_hyperliquid_resident_steady_is_44(config: LedgerConfig) -> None:
-    """§6.1 row 3: M1+M2 实际用量 **44/分**, which is 37 % of our 120."""
+    """§6.1 row 3: M1+M2 实际用量 **44/分**.
+
+    §6.1 called that 37 % of the 120 its placeholder split left us. Measured,
+    our share is 130, so the same 44 is 34 % of it — the transitional picture
+    §6.1 drew survives the measurement almost unchanged.
+    """
     bucket = config.bucket(HL_WEIGHT)
     assert bucket.resident_steady_per_min == 44
-    assert bucket.our_ceiling_per_min == 120
+    assert bucket.our_ceiling_per_min == 127
 
 
 # --------------------------------------------------------------------------- #
@@ -270,31 +357,52 @@ def test_hyperliquid_transitional_reserve_is_60(config: LedgerConfig) -> None:
     assert bucket.reserve_per_min == 40 + 20 == 60
 
 
-def test_binance_opportunistic_is_660_before_the_hard_cap_of_200(
+def test_binance_opportunistic_is_618_before_the_hard_cap_of_200(
     config: LedgerConfig,
 ) -> None:
-    """§6.1 row 1: 960 − max(300, 241) = **660/分**, 硬顶 **200/分**."""
+    """§6.1 row 1 gave 960 − max(300, 241) = 660/分. M1-B's measured 42 for the
+    development machine makes it 918 − max(300, 241) = **618/分**.
+
+    The hard cap of 200 binds either way, so the K-line backfill lane does not
+    actually change: the deduction comes out of headroom nobody was spending.
+    """
     bucket = config.bucket(BINANCE_WEIGHT)
-    assert bucket.opportunistic_formula_per_min(241) == 660
+    assert bucket.opportunistic_formula_per_min(241) == 618
+    assert bucket.opportunistic_hard_cap_per_min == 200
     assert bucket.opportunistic_available(241) == 200
 
 
-def test_futures_data_opportunistic_is_20_and_the_cap_equals_the_formula(
+def test_futures_data_opportunistic_drops_to_16_and_the_cap_stops_binding(
     config: LedgerConfig,
 ) -> None:
-    """§6.1 row 2: 80 − max(60, 54) = **20 次/分**; §20: 硬顶 20 现在等于算式结果."""
+    """§6.1 row 2 gave 80 − max(60, 54) = 20 次/分, equal to the hard cap.
+
+    M1-B's measured 4 for the development machine takes our ceiling to 76, so
+    the formula gives 76 − max(60, 54) = **16**, and ``min(16, 20)`` means the
+    hard cap of 20 has stopped binding. This is the bucket §6 already named as
+    the tightest one we have ("想加币先看这一路"), and it got tighter.
+    """
     bucket = config.bucket(FUTURES_DATA)
-    assert bucket.opportunistic_formula_per_min(54) == 20
+    assert bucket.opportunistic_formula_per_min(54) == 16
     assert bucket.opportunistic_hard_cap_per_min == 20
-    assert bucket.opportunistic_available(54) == 20
+    assert bucket.opportunistic_available(54) == 16
 
 
-def test_hyperliquid_opportunistic_is_60_with_a_deliberately_lower_cap_of_20(
+def test_hyperliquid_opportunistic_is_67_with_a_deliberately_lower_cap_of_20(
     config: LedgerConfig,
 ) -> None:
-    """§6.1 row 3: 120 − max(60, 44) = **60/分**, 硬顶 **20 权重/分** 故意压得更低."""
+    """§6.1 row 3 gave 120 − max(60, 44) = 60/分. Measured: 127 − 60 = **67/分**.
+
+    The hard cap of **20 权重/分** is unchanged and still binds, and §6.1's
+    reason for pressing it below the algebra now has measurements behind it:
+    "HL 那 120 是从共享出口里切出来的，把它吃满等于把整个出口顶到 1080 的天花板".
+    The other consumer on this egress was measured spending ~953/min at p95
+    that same 1080, so the headroom the cap protects is real and thin.
+    """
     bucket = config.bucket(HL_WEIGHT)
-    assert bucket.opportunistic_formula_per_min(44) == 60
+    assert bucket.profile.name == "transitional"
+    assert bucket.opportunistic_formula_per_min(44) == 67
+    assert bucket.opportunistic_hard_cap_per_min == 20
     assert bucket.opportunistic_available(44) == 20
 
 
@@ -308,11 +416,11 @@ def test_the_formula_never_subtracts_resident_twice(config: LedgerConfig) -> Non
     """
     bucket = config.bucket(FUTURES_DATA)
     old_shape = bucket.our_ceiling_per_min - bucket.reserve_per_min - 54
-    assert old_shape == -34
-    assert bucket.opportunistic_formula_per_min(54) == 20
-    assert bucket.opportunistic_formula_per_min(0) == 20
+    assert old_shape == 76 - 60 - 54 == -38
+    assert bucket.opportunistic_formula_per_min(54) == 16
+    assert bucket.opportunistic_formula_per_min(0) == 16
     # Above the reserve, the lane does shrink — that is the point of `max`.
-    assert bucket.opportunistic_formula_per_min(70) == 10
+    assert bucket.opportunistic_formula_per_min(70) == 6
 
 
 def test_reserve_is_a_floor_and_is_never_below_the_steady_load(
@@ -359,41 +467,52 @@ def test_retiring_the_legacy_collector_yields_1080_and_880(
 def test_the_wall_is_266_coins_and_the_bottleneck_is_futures_data(
     config: LedgerConfig,
 ) -> None:
-    """§6 + §20 review fix 4: 权重桶 (960 − 61) ÷ 1 = **899**;
-    ``futures_data`` 80 ÷ 0.3 = **266**; min(899, 266) = **266**.
+    """§6 + §20 review fix 4 computed 权重桶 (960 − 61) ÷ 1 = 899 and
+    ``futures_data`` 80 ÷ 0.3 = 266, min = 266.
+
+    M1-B's measured deduction moves both: (918 − 61) ÷ 1 = **857** and
+    76 ÷ 0.3 = **253**. ``min(857, 253) = 253`` — the bottleneck is still
+    ``futures_data``, so that conclusion survives; the number does not.
 
     The original "约 700 个币" counted the weight bucket only.
     """
     weight = config.coin_headroom(BINANCE_WEIGHT)
     requests = config.coin_headroom(FUTURES_DATA)
-    assert weight.wall_coins == 899
-    assert requests.wall_coins == 266
-    assert min(weight.wall_coins, requests.wall_coins) == 266
+    assert weight.wall_coins == 857
+    assert requests.wall_coins == 253
+    assert min(weight.wall_coins, requests.wall_coins) == 253
     assert config.coin_headroom_overall().key == config.bucket(FUTURES_DATA).key
 
 
-def test_the_safe_limit_is_240_coins(config: LedgerConfig) -> None:
-    """§6 / §20: 80 ÷ 0.3 ÷ 1.11 ≈ **240 个币** —— 266 是撞墙点，240 是还能安全退避的点.
+def test_the_safe_limit_is_228_coins(config: LedgerConfig) -> None:
+    """§6 / §20 gave 80 ÷ 0.3 ÷ 1.11 ≈ 240 个币 —— 266 是撞墙点，240 是还能安全
+    退避的点. After M1-B's deduction it is 76 ÷ 0.3 ÷ 1.11 ≈ **228**, wall 253.
 
-    The 1.11 is this bucket's own retry margin, ``reserve ÷ steady = 60 ÷ 54``.
+    The 1.11 is this bucket's own retry margin, ``reserve ÷ steady = 60 ÷ 54``,
+    and it does not move: it is a property of the lane, not of the ceiling.
     """
     requests = config.coin_headroom(FUTURES_DATA)
-    assert requests.retry_margin == Fraction(60, 54)
-    assert requests.safe_coins == 240
-    assert config.coin_headroom_overall().safe_coins == 240
+    assert requests.retry_margin == Fraction(60, 54) == Fraction(10, 9)
+    assert requests.safe_coins == 228
+    assert config.coin_headroom_overall().safe_coins == 228
 
 
-def test_today_180_coins_uses_two_thirds_of_the_tightest_bucket(
+def test_today_180_coins_uses_seven_tenths_of_the_tightest_bucket(
     config: LedgerConfig,
 ) -> None:
-    """§6: 当前 180 币用掉该桶 54/80 = 67.5%，是所有桶里最紧的一个."""
+    """§6 said 当前 180 币用掉该桶 54/80 = 67.5%，是所有桶里最紧的一个.
+
+    The ratio is against OUR ceiling, which the measured deduction moved to
+    76, so the same 180 coins now use 54/76 ≈ **71.1 %**. Still the tightest
+    bucket, and now tighter.
+    """
     usage = {
         key: Fraction(bucket.resident_steady_per_min, bucket.our_ceiling_per_min)
         for key, bucket in config.buckets.items()
     }
     tightest = max(usage, key=lambda key: usage[key])
     assert str(tightest) == FUTURES_DATA
-    assert usage[tightest] == Fraction(27, 40)
+    assert usage[tightest] == Fraction(54, 76) == Fraction(27, 38)
 
 
 # --------------------------------------------------------------------------- #
