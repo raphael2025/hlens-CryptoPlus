@@ -88,15 +88,20 @@ def test_funding_rate_reserve_is_2(config: LedgerConfig) -> None:
     assert bucket.reserve_per_min == 1 + 1 == 2
 
 
-def test_funding_rate_opportunistic_is_38_and_the_cap_equals_the_formula(
+def test_funding_rate_opportunistic_formula_is_38_but_the_cap_is_pressed_to_5(
     config: LedgerConfig,
 ) -> None:
-    """§6.1 公式：40 − max(2, 1) = **38 次/分**；跟随 ``futures_data`` 的先例，
-    硬顶直接等于算式结果。"""
+    """§6.1 公式：40 − max(2, 1) = **38 次/分** — still correct arithmetic.
+
+    M1-A2c: the hard cap is pressed down to **5**, below the formula, because
+    04 §11 第 10 项 leaves "``futures_data`` 与 ``fundingRate`` 是否同一个桶"
+    `unverified`. Same move as ``hyperliquid:info_weight``'s transitional
+    profile: the cap is deliberately lower than the algebra, not equal to it.
+    """
     bucket = config.bucket(FUNDING_RATE)
     assert bucket.opportunistic_formula_per_min(1) == 38
-    assert bucket.opportunistic_hard_cap_per_min == 38
-    assert bucket.opportunistic_available(1) == 38
+    assert bucket.opportunistic_hard_cap_per_min == 5
+    assert bucket.opportunistic_available(1) == 5
 
 
 def test_funding_rate_has_no_fast_lane(config: LedgerConfig) -> None:
@@ -123,6 +128,46 @@ def test_funding_rate_and_futures_data_fit_together_even_if_they_are_secretly_on
     assert combined_steady == 54 + 1 == 55
     assert combined_steady <= 80
     assert combined_steady <= futures_data.egress_ceiling_per_min
+
+
+def test_full_opportunistic_on_both_buckets_still_fits_in_80_if_they_share_a_counter(
+    config: LedgerConfig,
+) -> None:
+    """M1-A2c — the whole point of this task.
+
+    The steady-state check above (55 <= 80) does not cover the case that
+    motivated this task: BOTH buckets' opportunistic lanes filling up at the
+    same time. Before M1-A2c the ``funding_rate`` hard cap was 38 (the
+    formula's own answer, per M1-A2b), which gives
+
+        (54 + 20) + (1 + 38) = 113   vs a futures_data ceiling of 80
+
+    a 41 % overshoot if the two buckets turn out to share one physical
+    counter (04 §11 第 10 项, `unverified`). On the shared production egress
+    IP that overshoot is a 429 -> 418 that bans the whole machine, taking the
+    still-running legacy collector down with it. This test is the ledger-side
+    guardrail until M1-G's on-machine fixture recording settles the question.
+    """
+    futures_data = config.bucket(FUTURES_DATA)
+    funding_rate = config.bucket(FUNDING_RATE)
+
+    combined_full_opportunistic = (
+        futures_data.resident_steady_per_min
+        + futures_data.opportunistic_hard_cap_per_min
+        + funding_rate.resident_steady_per_min
+        + funding_rate.opportunistic_hard_cap_per_min
+    )
+
+    # Pin the inputs so this test cannot pass by two unrelated numbers
+    # happening to still add up: it must be exercising 54, 20, 1 and 5.
+    assert futures_data.resident_steady_per_min == 54
+    assert futures_data.opportunistic_hard_cap_per_min == 20
+    assert funding_rate.resident_steady_per_min == 1
+    assert funding_rate.opportunistic_hard_cap_per_min == 5
+
+    assert combined_full_opportunistic == 80
+    assert combined_full_opportunistic <= futures_data.egress_ceiling_per_min
+    assert combined_full_opportunistic <= 80
 
 
 # --------------------------------------------------------------------------- #
