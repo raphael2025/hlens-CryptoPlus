@@ -14,7 +14,7 @@
 | K 线 1m/1h/1d · 主动买入量 | 市场环境、历史分位 F8、记分板、taker 买卖比替代 | 回补写入 `market_1m`（带 `semantic`/`grid_s`/`backfilled`），**无独立 K 线表**；`takerBuyBaseVolume` **03 §5 无对应列**（见 §12） | Binance `/fapi/v1/klines`（字段 `takerBuyBaseVolume`）；HL `candleSnapshot`（深度受限，见 §5） | 逐币 |
 | 资金费率（当前 + 预测 + 历史） | 分歧榜 F7、历史分位 F8、每日摘要 F10 | `market_1m`（`funding_rate` 存该所原生周期原值 + `funding_interval_h` + `next_funding_ts`），**无 `funding_pred` 表** | Binance `/fapi/v1/premiumIndex` + `/fapi/v1/fundingInfo`；HL `metaAndAssetCtxs.funding` + `predictedFundings` | 全市场一次 |
 | 持仓量（当前 + 历史） | 分歧榜 F7、历史分位 F8 | `market_1m`（`oi_base`/`oi_usd`） | HL `metaAndAssetCtxs.openInterest`（全市场一次）；Binance `/fapi/v1/openInterest`（**仅逐币**）+ `/futures/data/openInterestHist`（历史） | HL 全市场一次；Binance 逐币 |
-| 多空比 / 主动买卖比（仅 Binance） | 币卡单所数字（F3：HL 该所不发布） | `ls_ratio`（`kind` 三类） | Binance `/futures/data/{globalLongShortAccountRatio,topLongShortAccountRatio,topLongShortPositionRatio,takerlongshortRatio}` | 逐币 |
+| 多空比 / 主动买卖比（仅 Binance） | 币卡单所数字（F3：HL 该所不发布） | `ls_ratio`（`kind` 三类） | Binance `/futures/data/{globalLongShortAccountRatio,topLongShortPositionRatio,takerlongshortRatio}`（**三类，不是四类**——`topLongShortAccountRatio` 已由 `03 §15` 划掉，没有确认功能消费它） | 逐币 |
 | 逐笔爆仓 / 爆仓聚合 | 爆仓事件流 F12（恒带 `下界`） | `liquidations`（`completeness=lower_bound`） | Binance WS `!forceOrder@arr`（下界）；HL 无公开全所级流，见 §8 | 下界采样 |
 | 合约元数据（符号、乘数、MMR 档、结算周期） | 币种范围 F1、口径对齐 F3、关键位（M6） | `instruments` · `coin_universe` | Binance `exchangeInfo` + `fundingInfo`；HL `meta`（`szDecimals/maxLeverage`），MMR ≈ 1/(2·maxLeverage) | 全市场一次 |
 | **（M4）** 逐笔→CVD · 盘口 · 现货 ／ **（M5）** 大户持仓 · 成交 · 资金费流水 | F20–F22 ／ F23–F27 | `trade_tick`（滚动 ≤7 天）→ 派生 `cvd_1m` · `book_l2_1m` · `hf_whitelist`（`cvd_1m` 与现货列 **03 §5 尚未列**，见 §12）／ hub 导入表 + 现采 | 见 §9 ／ §10 | 白名单 ≤10 币 ／ TOP N 地址 |
@@ -32,7 +32,7 @@
 | `/fapi/v1/premiumIndex` | 不传 symbol = 全市场 | `markPrice, indexPrice, lastFundingRate, nextFundingTime` | 1 单币 / 10 全市场 | 快照 | 60s 兜底，主用 WS |
 | `/fapi/v1/openInterest` | `symbol` 必填 | `openInterest` | 1 | 快照 | 逐币 1 min（180 币 = 180 W/min） |
 | `/futures/data/openInterestHist` | `symbol, period(5m…1d), limit≤500` | `sumOpenInterestValue` | 不吃权重（无 `X-MBX-USED-WEIGHT` 头），**记入 `futures_data` 请求桶** | **1000 次/5min**（`官方`）；500 条 / 30 天 | 冷启动一次 |
-| `/futures/data/{globalLongShortAccountRatio, topLongShortAccountRatio, topLongShortPositionRatio}` | 同上 | `longAccount` | 同上 | 同上 | **10 min，带 `limit` 取回中间点**（§4） |
+| `/futures/data/{globalLongShortAccountRatio, topLongShortPositionRatio}` | 同上 | `longAccount` | 同上 | 同上 | **10 min，带 `limit` 取回中间点**（§4） |
 | `/futures/data/takerlongshortRatio` | 同上 | `buyVol, sellVol` | 同上 | 同上 | 同上 |
 | `/fapi/v1/fundingRate` · `/fapi/v1/fundingInfo` | 前者 `symbol` 可选、`limit≤1000` | `fundingRate, fundingTime` / `fundingIntervalHours, adjustedFundingRateCap` | 共用独立请求桶 **500 次/5min/IP** | 1000 / 全史；后者只列非默认周期币 | 冷启动 + 每 8h 对账 · 1 h |
 

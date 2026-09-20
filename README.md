@@ -4,11 +4,11 @@
 
 First slice: **Binance (CEX) + Hyperliquid (DEX), perpetual futures.** One centralised venue and one decentralised venue are enough to show where the two definitions of the same number diverge.
 
-**Status: documentation only — there is no code yet.** This repository holds the product, feature, architecture and data-source documents that the build will follow. Milestones and their acceptance criteria are in [`docs/01-PRODUCT.md`](docs/01-PRODUCT.md) §5.2.
+**Status: M1 in progress — the collector core is being built one module at a time.** The normalized contracts, the rate-limit ledger and the adapter protocol are in; the venue adapters are not. This repository also holds the product, feature, architecture and data-source documents the build follows. Milestones and their acceptance criteria are in [`docs/01-PRODUCT.md`](docs/01-PRODUCT.md) §5.2.
 
 ## What will exist when it is built
 
-- **A minute-level collector** on a single VPS, recording price, mark price, funding and open interest for every perpetual listed on both venues — kept forever, never downsampled.
+- **A minute-level collector** on one self-owned server (which shares its public egress with an older collector that is still running), recording price, mark price, funding and open interest for every perpetual listed on both venues — kept forever, never downsampled.
 - **A static site** showing cross-venue divergence: one card per coin with both venues side by side, every number carrying its 30-day historical percentile and its sample size `n`.
 - **A daily Telegram digest** — the three most abnormal coins, the three largest divergences, one market line, the largest liquidations.
 - **Reproducible research notes** — public formula, public data window, a notebook anyone can rerun. Published even when the finding is "no effect".
@@ -48,7 +48,7 @@ hlens is a research tool. Nothing here is investment advice. Leveraged perpetual
 
 **当前状态：文档阶段，还没有代码。** 仓库现在只有指导建造的文档，里程碑与验收标准见 [`docs/01-PRODUCT.md`](docs/01-PRODUCT.md) §5.2。
 
-建成后会有：**分钟级采集器**（单台 VPS，两所共同上架的全部永续，价格 / 标记价 / 费率 / 持仓量，永久保留、不降采样）· **静态站**（一币一卡、两所并排，每个数字都带 30 天历史分位与样本量 n）· **每日 Telegram 摘要**（最不正常的 3 个币、分歧最大的 3 个币、一行市况、最大爆仓）· **可复现研究笔记**（公式、数据窗口、可直接重跑的 notebook；结论是"没有效果"也照样发布）。
+建成后会有：**分钟级采集器**（单台自有服务器，与一套仍在运行的旧采集器共用同一个公网出口；两所共同上架的全部永续，价格 / 标记价 / 费率 / 持仓量，永久保留、不降采样）· **静态站**（一币一卡、两所并排，每个数字都带 30 天历史分位与样本量 n）· **每日 Telegram 摘要**（最不正常的 3 个币、分歧最大的 3 个币、一行市况、最大爆仓）· **可复现研究笔记**（公式、数据窗口、可直接重跑的 notebook；结论是"没有效果"也照样发布）。
 
 与别人不同的地方：分解而不加总，永不给跨所的"全市场"数字；每句解读都带证据标签，n < 10 不显数值、n < 30 不显百分比；前端只读版本化 JSON，规则改动走 PR 并附校准报告；只描述不建议，不碰用户资金；爆仓数字一律标"下界"，源故障置灰并显示最后成功时间，不补零。
 

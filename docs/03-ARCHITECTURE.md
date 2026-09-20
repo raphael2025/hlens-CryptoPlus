@@ -110,9 +110,9 @@ flowchart LR
 
 | 表 | 粒度 | 主键 | 特有列 | 留存 | 行/天 |
 |---|---|---|---|---|---|
-| `instruments` · `coin_universe` | 每所每合约每版本（SCD-2）／每币一段在册期 | (venue, venue_symbol, valid_from) / (symbol, in_from) | symbol · venue_symbol · mult · funding_interval_h · tick · status · valid_from/to ／ in_to · reason | 永久 | ~0 |
-| `market_1m` | 每所每币每分钟 | (venue, symbol, ts) | mark · index_px · premium · funding_rate（该所原生周期原值）· funding_interval_h · next_funding_ts · oi_base · oi_usd · vol24h_usd · chg24h_pct · **obs_ts_fast** · **obs_ts_slow** · semantic · grid_s · backfilled | **永久，不降采样** | 518,400 |
-| `ls_ratio` | Binance 每币每 kind 每 5 分钟点（三类 kind） | (venue, symbol, kind, ts) | long_share · period | 永久 | 155,520 |
+| `instruments` · `coin_universe` | 每所每合约每版本（SCD-2）／每币一段在册期 | (venue, venue_symbol, valid_from) / (symbol, in_from)（**`coin_universe` 不设 `venue` 列**：在册与否是关于两所的同一个陈述，契约里它取跨所标记 `x`，存进表里是恒定值、是死重量。本节通用规则只要求每表带 `source` 与 `ingest_ts`，不含 `venue`，故不冲突） | symbol · venue_symbol · mult · funding_interval_h · tick · status · valid_from/to ／ in_to · reason | 永久 | ~0 |
+| `market_1m` | 每所每币每分钟 | (venue, symbol, ts) | mark · index_px · premium · funding_rate（该所原生周期原值）· funding_interval_h · next_funding_ts · oi_base · oi_usd · vol24h_usd · chg24h_pct · **obs_ts_fast** · **obs_ts_slow** · semantic（**闭值域 `mark_price` | `candle_close`**，M1-C 的 CHECK 用这两个字面量）· grid_s · backfilled | **永久，不降采样** | 518,400 |
+| `ls_ratio` | Binance 每币每 kind 每 5 分钟点（三类 kind） | (venue, symbol, kind, ts) | long_share · period（**整秒**，Binance `period=5m` → 300；与 `grid_s` 同单位） | 永久 | 155,520 |
 | `liquidations` | 每笔观测到的爆仓 | (venue, symbol, ts, event_id) `event_id NOT NULL` | side · price · size · notional_usd · throttled_source · **completeness**（`lower_bound`/`partial_history`）· **ingest_path**（`binance_ws` / `hl_wallet_derived`，2026-09-19 校核/M5） | 永久 | 估算 40,000 |
 | `divergence_1m` | 每币每分钟（派生，可重算） | (symbol, ts) | funding_spread_8h · mark_spread_bps · oi_share_bn · vol_share_bn · n_venues | **35 天滚动**，老分区 drop | 259,200 |
 | `metric_pctl` | 每 scope 每指标最新一点 | **(scope, metric)** | value · pctl · n · window_from/to · grid_s · updated | 覆盖写 | ~900 行常驻 |
@@ -198,6 +198,7 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 |---|---|---|---|---|---|---|
 | Binance 合约权重 | 2400/分 | **960/分**（40%） | **0**（旧采集器只采 Hyperliquid，**不碰 Binance**——这条假设必须由 preflight 每次启动核对，见下） | 960/分 | 241/分 | 960 = 天花板 ✓ |
 | Binance `futures_data` | 200/分 | **80 次/分**（40%） | **0** | 80 次/分 | 54 次/分 | 80 = 天花板 ✓ |
+| Binance `fundingRate`/`fundingInfo` 请求桶 | 500 次/5min = 100/分 | **40 次/分**（40%） | **0** | 40 次/分 | <1 次/分 | 40 = 天花板 ✓ |
 | **HL `/info` 权重** | 1200/分 | **1080/分**（90%） | **960/分 —— `未验证`，保守占位** | **120/分**（同为占位） | **44/分** | **960 + 120 = 1080 = 天花板 ✓** |
 | HL WS | 10 连接 · 1000 订阅 · **10 个不同 user** | 8 连接 · 800 订阅 · 8 user | 旧采集器已占的连接与 user 席位数 **未验证** | 剩余 | 1 订阅 | 上机第一件事就是数 |
 
@@ -215,7 +216,7 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 - **任何一次 HL 429，新采集器除了自己退避，还必须发一条 F4 私聊**——在共享 IP 上，429 意味着「另一个消费者可能也在挨打」，它是需要人看一眼的事件，不是可以静默吞掉的常规退避。
 - **Binance 的 418 停掉该所全部车道**（下文），在共享出口下这条更硬：418 封的是整台机器。
 - **「旧采集器不碰 Binance」必须被断言，不能靠记忆**：`config/egress-consumers.yaml` 由 raphael 维护（每个共用出口的消费者一行：名字 · 采哪个所 · 预留额 · 来源标签），preflight 读它做扣减并把整张表打印出来。它对不上现实时，错的方式是「我们以为有 960 权重其实没有」——所以这张表的每一次改动都要在 `ops_event` 留一行。
-- **旧采集器退役的回收流程**（三步，不改任何代码）：① 确认旧采集器进程已停且不会被拉起；② `venues.yaml` 里 `reserved.hyperliquid.hub_legacy` 由 960 改 0；③ 重跑 preflight，确认打印出的 HL 可用预算变成 **1080/分（整个 90% 天花板）**，写 `ops_event(kind=budget_reclaimed)`，状态页「当前保留额」那一行跟着变。**回收之前不得开 M5 的 HL 现采。**
+- **旧采集器退役的回收流程**（**四步**，不改任何代码；2026-09-20 校核：原文写三步，照着做会被加载器拒绝执行）：① 确认旧采集器进程已停且不会被拉起；② `egress-consumers.yaml` 里 `reserved.hyperliquid.hub_legacy` 由 960 改 0；③ **给这个 0 补上 `assertion:` 与 `checked_by:`** —— 加载器不接受裸的 0（「旧采集器不碰 X」必须被断言、不能靠记忆，见上一条），而这一步恰好就是把第 ① 步那句「已停且不会被拉起」落成文字的地方；④ 重跑 preflight，确认打印出的 HL 可用预算变成 **1080/分（整个 90% 天花板）**，写 `ops_event(kind=budget_reclaimed)`，状态页「当前保留额」那一行跟着变。**回收之前不得开 M5 的 HL 现采。**
 - **开发机也在这个出口上**（第 8 节）：dev 的 live 预算为 0，不再只是「别挤 hub」，而是「别挤生产自己」。
 
 **Binance 合约 WS 地址已拆分（A6 §4-1，影响 M1/M2 不只 M4）**：legacy `wss://fstream.binance.com/stream` **官方已于 2026-04-23 永久停用**，现分三组——`/public`（`@depth` `@bookTicker`）· `/market`（`@aggTrade` `@markPrice` `@kline_` `@ticker` **`@forceOrder`**）· `/private`。**M1/M2 用到的 `!markPrice@arr` 与 `!forceOrder@arr` 都在 `/market` 组**；M4 的 `@depth` 在 `/public`，届时**至少两条连接**。`config/venues.yaml` 里三个 base URL 分开配，标 `官方`。
@@ -225,18 +226,20 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 
 - **保底的定义**：`reserve` 是**留给 resident 的地板，必须 ≥ resident 的稳态用量**，否则「常驻保底」这四个字不成立（决定 A7）。
 - **opportunistic 的公式改为** `可用 = 天花板 − max(reserve, resident 实际用量)`，再取一个硬顶。原公式 `预算 − 保底 − 常驻实际用量` 是把 resident 减了两遍。
+- **快道地板同样挡住 opportunistic**（2026-09-20 校核）：opportunistic 的实际可用还要再减去快道尚未花掉的那部分地板，即 `min(算式结果, 天花板 − 未用地板 − 已用总量)`。只按字面公式算，resident 用量高时 opportunistic 会吃进地板，「任何时刻不被挤占」这句话就不成立了。这比字面公式严，是有意的。
 
 | 桶 | 天花板 | resident 稳态 | `reserve`（算式） | opportunistic 可用 | 硬顶 |
 |---|---|---|---|---|---|
 | Binance 权重 | 960/分 | 241/分（其中快道 20） | **300/分** = 241 × 1.25（25% 重试余量，5xx 风暴会让请求数翻倍而 AIMD 只对 429 生效）；其中**快道地板 120/分**，任何时刻不被其余 resident 挤占 | 960 − max(300, 241) = **660/分** | **200/分**（留 460 的退避余量；Binance 侧的 opportunistic 只有 K 线回补，用不到更多） |
+| `fundingRate` 请求桶 | 40 次/分 | **1 次/分**（冷启动 + 每 8h 对账 + 1h `fundingInfo`；loader 只吃整数，`<1` 向上取整） | **2 次/分** = 1 + 1 | 40 − max(2, 1) = **38 次/分** | **5 次/分**——**故意压得远低于算式**：`04 §11 第 10 项` 说「`futures_data` 与 `fundingRate` 是否同一个桶」官方未说明、`未验证`。若其实是同一个，两边都吃满 = (54+20)+(1+38) = **113**，远超 `futures_data` 的 80 红线。`80 − 54 − 20 − 1 = 5` 同桶分桶都安全。**解除条件**：M1-G 上机录 fixture 时确认两者独立之后，可放回 38 |
 | `futures_data` | 80 次/分 | **54 次/分**（3 类 × 180 币 ÷ 10 分钟） | **60 次/分** = 54 + 6。6 次/分的重试余量只有 11%，比权重桶的 25% 低，理由是**这一路的漏请求会自愈**：数据是 5 分钟网格，下一次轮询用 `limit` 会把上一窗口漏掉的点一并取回，所以重试不必抢在本窗口内完成 | 80 − max(60, 54) = **20 次/分** | **20 次/分**——**它现在等于算式结果，不再是一个另写的、和公式打架的数** |
-| HL 权重（过渡期） | 120/分（我们那一份） | 44/分 | **60/分**（快道 40 + 元数据与重试 20） | 120 − max(60, 44) = **60/分** | **20 权重/分**——**故意压得比算式低**：HL 那 120 是从共享出口里切出来的，把它吃满等于把整个出口顶到 1080 的天花板，一点退避余量都不剩 |
+| HL 权重（过渡期） | 120/分（我们那一份） | 44/分 | **60/分**（快道 40 + 元数据与重试 20）；其中**快道地板 40/分**（2026-09-20 补：原表只给了 Binance 的地板。40 = `metaAndAssetCtxs` W=20 × 每 30 s，正好等于稳态，快道没有重试余量——这是 120 这个过渡期天花板夹出来的唯一不自相矛盾的值。**M1-B 用实测值换掉 960 之后，HL 天花板会变，这个 40 必须重算**） | 120 − max(60, 44) = **60/分** | **20 权重/分**——**故意压得比算式低**：HL 那 120 是从共享出口里切出来的，把它吃满等于把整个出口顶到 1080 的天花板，一点退避余量都不剩 |
 | HL 权重（退役回收后） | 1080/分 | 44/分（M5 后 124/分） | 200/分 | **880/分** | 400/分 |
 
 **这个裁决的两个可验证后果**：① **M2-1 的 30 天 Binance OI 回补** = `openInterestHist` limit=500、每币 18 次 × 180 币 = **3,110 次 ÷ 20 次/分 ≈ 156 分钟 ≈ 2.6 小时**（可续跑，不影响分钟链路）。② **F11 的 HL 两年费率回补** = 157,680 权重 ÷ 20 权重/分 ≈ **5.5 天**（可续跑，跑几天是设计内的，不是故障）；旧采集器退役、预算回收到 880/分之后，同一个回补缩到**约 3 小时**——**这是把 F11 排在退役之后做的具体理由**。**在 80 次/分的红线内凑得出来，不需要提高红线。**
 
 **其余不变**：**任何 429 让 opportunistic 停 1 小时，resident 只降速（AIMD 砍到 75%）**；回补必须分块、可续跑（`backfill_cursor`），允许跑几天。
-- **418 行为（2026-09-19 校核，原文只字未提）**：见 418 → 读 `Retry-After` → **停掉该所全部车道**（不是只砍 25%）→ `ingest_gap(cause=ip_ban)` → 立即发 F4 私聊。`futures_data` 与 `fapi` 共用一个 IP，429 之后继续打会升级成 418 封整个 IP，连快道一起死。
+- **418 行为（2026-09-19 校核，原文只字未提）**：见 418 → 读 `Retry-After` → **停掉该所全部车道，并同时把 resident 砍到 75%**（2026-09-20 校核：原文「不是只砍 25%」读作「不止是砍，而不是不砍」——`Retry-After` 过期后满速重连，正是再挨一次封的走法）→ `ingest_gap(cause=ip_ban)` → 立即发 F4 私聊。`futures_data` 与 `fapi` 共用一个 IP，429 之后继续打会升级成 418 封整个 IP，连快道一起死。
 - **突发整形**：10 分钟车道的 540 次请求必须**匀速摊到窗口内**（54 次/分），不许在窗口首秒打完。
 - **WS 重连**：Binance 每 IP 每 5 分钟 ≤ 300 次连接、24 h 强制断开，重连风暴要记账并退避。
 
@@ -409,7 +412,7 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 
 ## 16. 建造顺序与任务清单
 
-**M1 采集核心，六步，一次只开一个模块，估算合计 ≈ 33 h**：① 归一化契约 5 h · ② 限速账本（两类桶 + **resident/opportunistic 两类消费者** + AIMD + **418 行为**）8 h · ③ preflight CLI（出口哈希 · 三条断言 · **共享出口的预算扣减表** · **区域与能力矩阵** · 时钟 · 磁盘 `D_free` · PG ≥ 18.6 · 覆盖矩阵）6 h · ④ 适配器协议与能力声明 3 h · ⑤ Binance 行情适配器（**WS 用 `/market` 组**）7 h · ⑥ Hyperliquid 行情适配器 4 h。
+**M1 采集核心，六步，一次只开一个模块，估算合计 ≈ 33 h**（任务编号 `M1-A1`…`M1-A6`，与下面的 ①…⑥ 一一对应；`M1-A1` 另含步骤 ⓪ 仓库骨架与接缝③ 边界测试）：① 归一化契约 5 h · ② 限速账本（两类桶 + **resident/opportunistic 两类消费者** + AIMD + **418 行为**）8 h · ③ preflight CLI（出口哈希 · 三条断言 · **共享出口的预算扣减表** · **区域与能力矩阵** · 时钟 · 磁盘 `D_free` · PG ≥ 18.6 · 覆盖矩阵）6 h · ④ 适配器协议与能力声明 3 h · ⑤ Binance 行情适配器（**WS 用 `/market` 组**）7 h · ⑥ Hyperliquid 行情适配器 4 h。
 
 | # | 模块 | raphael 不读代码就能验的检查 |
 |---|---|---|
