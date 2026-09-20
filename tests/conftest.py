@@ -4,10 +4,13 @@ moves when a test moves it."""
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from hlens_core.ratelimit import FakeClock, LedgerConfig, RateLimitLedger
@@ -183,3 +186,122 @@ def preflight_fixture(name: str) -> tuple[int, Any]:
     assert document["source"] in {"documented", "live-recorded"}, document["source"]
     status_code: int = document["status_code"]
     return status_code, document["payload"]
+
+
+# --------------------------------------------------------------------------- #
+# M1-C — the schema, on a real PostgreSQL
+#
+# These tests need a server, because what they assert is what PostgreSQL does
+# with the DDL: which partition a row lands in, whether a CHECK fires, what
+# `ON CONFLICT ... WHERE` refuses to overwrite. A mock would only assert that
+# the .sql files contain the strings someone typed.
+#
+# Connection: `HLENS_TEST_ADMIN_DSN`, defaulting to the local unix socket. No
+# host, no database name and no credential is written into this repository
+# (AGENTS §3) — the default is a socket path libpq builds itself. When no
+# server answers, the whole group skips with the reason, so `uv run pytest -q`
+# stays green on a machine without one.
+# --------------------------------------------------------------------------- #
+MIGRATIONS_DIR = REPO_ROOT / "packages" / "hlens-collector" / "migrations"
+COLLECTOR_SQL_DIR = REPO_ROOT / "packages" / "hlens-collector" / "sql"
+
+ADMIN_DSN_ENV = "HLENS_TEST_ADMIN_DSN"
+DEFAULT_ADMIN_DSN = "postgresql:///postgres"
+
+#: The table list of docs/03-ARCHITECTURE.md §5, which `\dt` must match.
+#: `hlens_meta.schema_migrations` is not here: it is infrastructure and lives
+#: in its own schema precisely so that this list stays exactly §5's.
+ARCHITECTURE_TABLES: frozenset[str] = frozenset(
+    {
+        "instruments",
+        "coin_universe",
+        "market_1m",
+        "ls_ratio",
+        "liquidations",
+        "divergence_1m",
+        "metric_pctl",
+        "metric_coverage",
+        "source_health",
+        "ingest_gap",
+        "collector_run",
+        "backfill_cursor",
+        "notify_log",
+        "ops_event",
+    }
+)
+
+#: The four §5 tables partitioned monthly by `ts`.
+PARTITIONED_TABLES: frozenset[str] = frozenset(
+    {"market_1m", "ls_ratio", "liquidations", "divergence_1m"}
+)
+
+#: The three §5 names that carry `USING brin (ts) WITH (pages_per_range=32)`.
+BRIN_TABLES: frozenset[str] = frozenset({"market_1m", "ls_ratio", "liquidations"})
+
+#: Seam ④ (03 §2): M4's tables are named in the documents and created by no
+#: M1 migration.
+SEAM_FOUR_TABLES: frozenset[str] = frozenset(
+    {"trade_tick", "cvd_1m", "book_l2_1m", "spot_1m", "hf_whitelist"}
+)
+
+
+def migration_files() -> list[Path]:
+    """The numbered migrations, in the order `scripts/migrate.sh` applies them."""
+    return sorted(MIGRATIONS_DIR.glob("[0-9][0-9][0-9]_*.sql"))
+
+
+def collector_sql(name: str) -> str:
+    """One statement from `packages/hlens-collector/sql/`, read from disk.
+
+    The tests run the same text the collector will run. A copy pasted into a
+    test would pass while the file it is meant to pin drifts away from it.
+    """
+    return (COLLECTOR_SQL_DIR / f"{name}.sql").read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="session")
+def migrated_dsn() -> Iterator[str]:
+    """A scratch database with every migration applied, dropped afterwards.
+
+    Session-scoped: the migrations run once. Each test gets its own
+    transaction and rolls it back, so the tests do not see each other's rows.
+    """
+    admin_dsn = os.environ.get(ADMIN_DSN_ENV, DEFAULT_ADMIN_DSN)
+    try:
+        admin = psycopg.connect(admin_dsn, autocommit=True, connect_timeout=5)
+    except psycopg.Error as exc:  # pragma: no cover - depends on the machine
+        pytest.skip(
+            f"no PostgreSQL reachable for the M1-C schema tests "
+            f"(set {ADMIN_DSN_ENV}; tried {admin_dsn!r}): {exc}"
+        )
+
+    name = f"hlens_m1c_test_{os.getpid()}"
+    with admin:
+        admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
+        admin.execute(f'CREATE DATABASE "{name}"')
+
+    dsn = psycopg.conninfo.make_conninfo(admin_dsn, dbname=name)
+    try:
+        with psycopg.connect(dsn) as conn:
+            for path in migration_files():
+                conn.execute(path.read_text(encoding="utf-8"))
+            conn.commit()
+        yield dsn
+    finally:
+        with psycopg.connect(admin_dsn, autocommit=True) as cleanup:
+            cleanup.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.fixture
+def db(migrated_dsn: str) -> Iterator[psycopg.Connection[Any]]:
+    """A connection in a transaction that is always rolled back.
+
+    Deliberately NOT autocommit: `market_1m_stage.sql` creates its temp table
+    `ON COMMIT DROP`, which is the shape §3's batch-write rule requires, and
+    the rollback is what keeps one test's staged batch out of the next one.
+    """
+    with psycopg.connect(migrated_dsn) as conn:
+        try:
+            yield conn
+        finally:
+            conn.rollback()

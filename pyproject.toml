@@ -57,6 +57,14 @@ dev = [
   # because §3 runs mypy in strict mode and the ledger parses the two YAML
   # config files. Not in §3's lock table — see the PR's "Doc corrections".
   "types-pyyaml==6.0.12.20260906",
+  # M1-C. The schema tests apply the numbered .sql migrations to a scratch
+  # database and exercise the three market_1m upsert statements against it;
+  # §3's test rules require the batch path to be `cursor.copy()` into a temp
+  # table, which is a psycopg API, so the tests need the driver §3 already
+  # locks. The `binary` extra ships libpq with the wheel, so a developer does
+  # not need libpq headers to run the suite. Production code does not import
+  # psycopg yet — `collector` (M1-E) will, and will declare it itself.
+  "psycopg[binary]==3.3.6",
 ]
 
 # --------------------------------------------------------------------------- #
