@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from conftest import reclaimed_consumers_yaml
+from conftest import HL_RESERVATION_MARKER, reclaimed_consumers_yaml, set_hl_reservation
 from hlens_core.ratelimit import ConfigError, LedgerConfig, SourceTag, VenuesConfig
 
 
@@ -254,8 +254,13 @@ def test_an_unknown_source_tag_refuses_to_load(
 def test_reservations_larger_than_the_ceiling_refuse_to_load(
     venues_path: Path, consumers_path: Path, tmp_path: Path
 ) -> None:
-    text = _consumers_text(consumers_path).replace(
-        "reserved_per_min: 960", "reserved_per_min: 1200"
+    # 1200 is not a synthetic number. It is the per-egress-IP budget the legacy
+    # Hyperliquid collector gives ITSELF (M1-B, 2026-09-20), and it does not
+    # know this project exists. Our whole egress ceiling is 1080, so that one
+    # consumer's own configured cap is already over the line. This test is the
+    # loader refusing the configuration we may actually be handed one day.
+    text = set_hl_reservation(
+        _consumers_text(consumers_path), "reserved_per_min: 1200\nsource: measured"
     )
     with pytest.raises(ConfigError, match="over the line"):
         LedgerConfig.load(venues_path, _write(tmp_path, "c.yaml", text))
@@ -264,16 +269,47 @@ def test_reservations_larger_than_the_ceiling_refuse_to_load(
 # --------------------------------------------------------------------------- #
 # Unknown is not zero
 # --------------------------------------------------------------------------- #
-def test_unknown_websocket_seats_are_carried_as_unknown(config: LedgerConfig) -> None:
+def test_websocket_seats_are_now_counted_rather_than_unknown(
+    config: LedgerConfig,
+) -> None:
     """§6.1 row 4: 旧采集器已占的连接与 user 席位数 **未验证** —— 上机第一件事就是数.
 
-    Rounding an unknown seat count to zero is the one answer that is certainly
-    wrong: seats are indivisible and zero-sum (04 §4).
+    M1-B did the counting. The legacy Hyperliquid collector is pure REST
+    against ``/info`` — no WebSocket client exists anywhere in its two runtime
+    packages — so it holds no seats at all, and these stopped being `null`.
+    All 8 connections / 800 subscriptions / 8 user seats are ours.
     """
-    unknown = config.consumers.unknown_seats("hyperliquid")
-    assert {seat.seat for seat in unknown} == {"connections", "distinct_users"}
-    assert all(seat.reserved is None for seat in unknown)
+    assert not config.consumers.unknown_seats("hyperliquid")
     assert not config.consumers.unknown_seats("binance")
+    seats = [
+        seat
+        for seat in config.consumers.seats
+        if seat.venue == "hyperliquid" and seat.consumer == "hub_legacy"
+    ]
+    assert {seat.seat for seat in seats} == {"connections", "distinct_users"}
+    assert {seat.reserved for seat in seats} == {0}
+    assert {seat.source.value for seat in seats} == {"measured"}
+
+
+def test_an_unknown_seat_is_still_refused_as_unsubtractable(
+    venues_path: Path, consumers_path: Path, tmp_path: Path
+) -> None:
+    """`null` is not `0`, and the distinction still has to survive.
+
+    Rounding an *unknown* seat count to zero is the one answer that is
+    certainly wrong — seats are indivisible and zero-sum (04 §4) — so the two
+    must not be spelled the same way. Now that the real file says 0 because
+    somebody counted, this is where that rule keeps being exercised.
+    """
+    text = _consumers_text(consumers_path).replace(
+        "            reserved: 0\n            source: measured",
+        "            reserved: null\n            source: unverified",
+        1,
+    )
+    reloaded = LedgerConfig.load(venues_path, _write(tmp_path, "c.yaml", text))
+    unknown = reloaded.consumers.unknown_seats("hyperliquid")
+    assert [seat.seat for seat in unknown] == ["connections"]
+    assert all(seat.reserved is None for seat in unknown)
 
 
 def test_the_reclamation_edit_is_a_one_number_edit(
@@ -282,8 +318,9 @@ def test_the_reclamation_edit_is_a_one_number_edit(
     """§6.1 retirement: three steps, "不改任何代码"."""
     before = _consumers_text(consumers_path)
     after = reclaimed_consumers_yaml(before)
-    assert before.count("reserved_per_min: 960") == 1
-    assert "reserved_per_min: 960" not in after
+    assert before.count(HL_RESERVATION_MARKER) == 1
+    assert after.count(HL_RESERVATION_MARKER) == 1
+    assert "reserved_per_min: 0" in after.split(HL_RESERVATION_MARKER)[1]
     reclaimed = LedgerConfig.load(venues_path, _write(tmp_path, "c.yaml", after))
     assert reclaimed.bucket("hyperliquid:info_weight").our_ceiling_per_min == 1080
 
