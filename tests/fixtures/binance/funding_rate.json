@@ -1,0 +1,22 @@
+{
+  "source": "documented",
+  "endpoint": "/fapi/v1/fundingRate",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 2. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), and M1-A5 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. 04 2's field list is fundingRate + fundingTime. The venue's own response also carries a markPrice, which is not read because it is not in the document.",
+  "payload": [
+    {
+      "symbol": "1000PEPEUSDT",
+      "fundingRate": "-0.00005000",
+      "fundingTime": 1789790400000
+    },
+    {
+      "symbol": "1000PEPEUSDT",
+      "fundingRate": "0.00012500",
+      "fundingTime": 1789804800000
+    },
+    {
+      "symbol": "1000PEPEUSDT",
+      "fundingRate": "0.00003000",
+      "fundingTime": 1789819200000
+    }
+  ]
+}

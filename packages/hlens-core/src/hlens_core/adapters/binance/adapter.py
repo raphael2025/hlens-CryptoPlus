@@ -187,8 +187,9 @@ class BinanceMarketDataAdapter:
         and ``universe`` (M1-D) owns the decision of which coins the table then
         holds. :meth:`adopt_symbols` is how it hands one back.
 
-        ``mirror`` switches every REST path onto ``www.binance.com`` (``04``
-        §6). It is a **preflight** decision — only preflight knows where the
+        ``mirror`` switches every REST path onto the configured mirror host
+        (``04`` §6; the host itself lives in ``config/venues.yaml``, never
+        here). It is a **preflight** decision — only preflight knows where the
         egress actually is — so it is a constructor argument and never
         something a failed call flips on its own.
         """

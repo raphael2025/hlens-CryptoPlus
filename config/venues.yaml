@@ -308,7 +308,8 @@ venues:
         source: official
         doc: >-
           04 §2 变更公告（2026-04-23 生效）：`!markPrice@arr@1s` 与
-          `!forceOrder@arr` 都在 /market 组；legacy .../stream 已永久停推。
+          `!forceOrder@arr` 都在 /market 组；旧的合并地址（fstream 根路径）
+          已永久停推，且不出现在本文件里。
       ws_public:
         value: "wss://fstream.binance.com/public"
         source: official

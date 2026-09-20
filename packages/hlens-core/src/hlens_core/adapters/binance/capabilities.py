@@ -155,8 +155,8 @@ def binance_capabilities() -> CapabilitySet:
             ),
             unsupported(
                 Capability.SPOT,
-                note="M4 (F22). Spot is a different host (api.binance.com) with its own "
-                "weight bucket (04 §9.3); it is not this adapter's venue",
+                note="M4 (F22). Spot is a different HOST with its own 6000/min weight "
+                "bucket (04 §9.3), so it is not this adapter's venue at all",
             ),
         ),
     )

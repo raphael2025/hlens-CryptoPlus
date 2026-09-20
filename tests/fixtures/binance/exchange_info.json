@@ -1,0 +1,71 @@
+{
+  "source": "documented",
+  "endpoint": "/fapi/v1/exchangeInfo",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 2. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), and M1-A5 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. Three entries, one of them deliberately not a PERPETUAL: 04 2 reads this endpoint with 'contractType only PERPETUAL'.",
+  "payload": {
+    "serverTime": 1789819200000,
+    "timezone": "UTC",
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "pair": "BTCUSDT",
+        "contractType": "PERPETUAL",
+        "status": "TRADING",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "filters": [
+          {
+            "filterType": "PRICE_FILTER",
+            "tickSize": "0.10",
+            "minPrice": "0.10",
+            "maxPrice": "1000000"
+          },
+          {
+            "filterType": "LOT_SIZE",
+            "stepSize": "0.001"
+          }
+        ]
+      },
+      {
+        "symbol": "1000PEPEUSDT",
+        "pair": "1000PEPEUSDT",
+        "contractType": "PERPETUAL",
+        "status": "TRADING",
+        "baseAsset": "1000PEPE",
+        "quoteAsset": "USDT",
+        "filters": [
+          {
+            "filterType": "PRICE_FILTER",
+            "tickSize": "0.0000001",
+            "minPrice": "0.0000001",
+            "maxPrice": "1000000"
+          },
+          {
+            "filterType": "LOT_SIZE",
+            "stepSize": "0.001"
+          }
+        ]
+      },
+      {
+        "symbol": "BTCUSDT_260925",
+        "pair": "BTCUSDT_260925",
+        "contractType": "CURRENT_QUARTER",
+        "status": "TRADING",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "filters": [
+          {
+            "filterType": "PRICE_FILTER",
+            "tickSize": "0.10",
+            "minPrice": "0.10",
+            "maxPrice": "1000000"
+          },
+          {
+            "filterType": "LOT_SIZE",
+            "stepSize": "0.001"
+          }
+        ]
+      }
+    ]
+  }
+}
