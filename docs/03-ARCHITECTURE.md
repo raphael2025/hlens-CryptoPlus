@@ -111,7 +111,7 @@ flowchart LR
 | 表 | 粒度 | 主键 | 特有列 | 留存 | 行/天 |
 |---|---|---|---|---|---|
 | `instruments` · `coin_universe` | 每所每合约每版本（SCD-2）／每币一段在册期 | (venue, venue_symbol, valid_from) / (symbol, in_from)（**`coin_universe` 不设 `venue` 列**：在册与否是关于两所的同一个陈述，契约里它取跨所标记 `x`，存进表里是恒定值、是死重量。本节通用规则只要求每表带 `source` 与 `ingest_ts`，不含 `venue`，故不冲突） | symbol · venue_symbol · mult · funding_interval_h · tick · status · valid_from/to ／ in_to · reason | 永久 | ~0 |
-| `market_1m` | 每所每币每分钟 | (venue, symbol, ts) | mark · index_px · premium · funding_rate（该所原生周期原值）· funding_interval_h · next_funding_ts · oi_base · oi_usd · vol24h_usd · chg24h_pct · **obs_ts_fast** · **obs_ts_slow** · semantic（**闭值域 `mark_price` | `candle_close`**，M1-C 的 CHECK 用这两个字面量）· grid_s · backfilled | **永久，不降采样** | 518,400 |
+| `market_1m` | 每所每币每分钟 | (venue, symbol, ts) | mark · index_px · premium（**只有 Hyperliquid 有值，Binance 永久 `NULL`**，见下）· funding_rate（该所原生周期原值）· funding_interval_h · next_funding_ts · oi_base · oi_usd · vol24h_usd · chg24h_pct · **obs_ts_fast** · **obs_ts_slow** · semantic（**闭值域 `mark_price` | `candle_close`**，M1-C 的 CHECK 用这两个字面量）· grid_s · backfilled | **永久，不降采样** | 518,400 |
 | `ls_ratio` | Binance 每币每 kind 每 5 分钟点（三类 kind） | (venue, symbol, kind, ts) | long_share · period（**整秒**，Binance `period=5m` → 300；与 `grid_s` 同单位） | 永久 | 155,520 |
 | `liquidations` | 每笔观测到的爆仓 | (venue, symbol, ts, event_id) `event_id NOT NULL` | side · price · size · notional_usd · throttled_source · **completeness**（`lower_bound`/`partial_history`）· **ingest_path**（`binance_ws` / `hl_wallet_derived`，2026-09-19 校核/M5） | 永久 | 估算 40,000 |
 | `divergence_1m` | 每币每分钟（派生，可重算） | (symbol, ts) | funding_spread_8h · mark_spread_bps · oi_share_bn · vol_share_bn · n_venues | **35 天滚动**，老分区 drop | 259,200 |
@@ -148,6 +148,12 @@ CHECK (scope ~ '^(binance|hyperliquid|x):([A-Z0-9]{1,15}|\*)$')
 ```
 
 `binance:BTC`（单所单币）· `x:BTC`（跨所单币，费率差 / 标记价差）· `x:*`（**F10 的市况行 `market_funding_median` 存在这里**）· `hyperliquid:*`（M5 大户面）。**理由**：① A3 的三种形态有三种解析规则，且"跨所 BTC"与"币 BTC"在 `BTC` 这一个字面量上分不开；② 它装不下"某一所的全市场"，而 F10 与 M5 的大户面都需要；③ 固定两段语法只需一条 `CHECK`、一套解析、一个索引，两张表可以直接 join 对齐"这个分位有没有足够覆盖"；④ 它同时就是导出 JSON 的键，**在日志里可 grep**——凌晨排障时这一点比省一个字符值钱。**否决两列 `(venue_scope, symbol_scope)` 的写法**：每一处 join 与每一处导出都要重新拼接，而收益只是省掉一个正则。
+
+**`premium` 与 `oi_usd` 的裁决（2026-09-20，M1-A5/A6 查实后补）**：
+- **`premium` 只有 Hyperliquid 有。** Binance 的 `premiumIndex` 发的是 `markPrice` `indexPrice` `lastFundingRate` `nextFundingTime`，没有 premium，WS 帧里也没有。**禁止用 `mark − index` 顶替**——HL 的 premium 是它自己基于 oracle 的构造，与「标记价减指数价」不是同一个量，一列里混两种来源正是接缝① 要防的口径混淆。Binance 侧永久写 `NULL`。
+- **`premium` 当前没有任何确认功能消费它**（F7 的四个指标是资金费率差 · 两所 `mark` 相减的标记价差 · 持仓量份额变化 · 成交份额变化，都不经过它）。按 `§17` 的规矩本该划掉，**这里例外保留，唯一理由是它不可回补**：HL 的 `candleSnapshot` 只留最近 5000 根（1 分钟粒度约 3.5 天）且 premium 不在 K 线里，今天不存这一列，这条分钟序列就永远不存在。代价是一个可空 `numeric`。将来确认不需要，划掉只是一次迁移；将来需要而当时没存，补不回来。
+- **`oi_usd` 是派生值，不是观测值。** 两所都只发基础单位的持仓量，所以它只能由 `oi_base × mark × mult` 算出，**`mult` 未知时写 `NULL`**（与本节第 3 条 `notional_usd` 同口径，不另起一套）。它与 `premium` 相反，**有确认消费者**：F7 的「持仓量份额变化」要跨所比 OI，没有共同单位就算不出来。
+- **适配器一律对这两列写 `None`**（`M1-A5`/`M1-A6` 已如此）。**`oi_usd` 在哪里算是 `M1-C` 必须回答的设计题**：`oi_usd` 属慢道（60 s）、`mark` 属快道（30 s），而本节规定三条 upsert 语句永不合并，所以 `M1-C` 必须写明它是在入库边界算还是在 `compute` 层算，以及两道先到后到时的取值语义。**没有这个答案不得开工建表。**
 
 **热小表的膨胀参数必须写进建表迁移**（2026-09-19 校核）：`market_1m` `fillfactor=80`（每逻辑行每分钟被写 3 次，默认 100 走不了 HOT，每次更新都写新索引条目）；`metric_pctl` / `source_health` / `metric_coverage` `fillfactor=70` + `autovacuum_vacuum_scale_factor=0` + `autovacuum_vacuum_threshold=100` + `autovacuum_analyze_threshold=100`（`metric_pctl` 是 900 行的表、每天约 200 万次更新，默认参数必膨胀）。
 
