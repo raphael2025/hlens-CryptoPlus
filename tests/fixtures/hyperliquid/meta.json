@@ -1,0 +1,27 @@
+{
+  "source": "documented",
+  "endpoint": "POST /info {\"type\":\"meta\"}",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 3. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), this development machine shares that egress with a still-running collector OF THIS SAME VENUE, and M1-A6 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. Three coins: an ordinary one, a `k` thousand-prefix one (AGENTS 3.5's kPEPE = Binance 1000PEPE), and a third so the universe is not two. No status field exists on this endpoint, which is why every record's status is None.",
+  "payload": {
+    "universe": [
+      {
+        "name": "BTC",
+        "szDecimals": 5,
+        "maxLeverage": 40,
+        "marginTableId": 50
+      },
+      {
+        "name": "kPEPE",
+        "szDecimals": 0,
+        "maxLeverage": 10,
+        "marginTableId": 51
+      },
+      {
+        "name": "HYPE",
+        "szDecimals": 2,
+        "maxLeverage": 5,
+        "marginTableId": 52
+      }
+    ]
+  }
+}

@@ -95,3 +95,35 @@ def binance_fixture_source(name: str) -> str:
     document = json.loads((BINANCE_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
     source: str = document["source"]
     return source
+
+
+# --------------------------------------------------------------------------- #
+# M1-A6 — the Hyperliquid adapter's offline fixtures
+# --------------------------------------------------------------------------- #
+HYPERLIQUID_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "hyperliquid"
+
+
+def hyperliquid_payload(name: str) -> Any:
+    """One trimmed Hyperliquid fixture's payload, checked for its provenance tag.
+
+    Every file under ``tests/fixtures/hyperliquid/`` is tagged ``source:
+    documented`` and hand-built from ``docs/04-DATA-SOURCES.md`` §3's field
+    table. AGENTS §3.3 requires a *recording* to be made from the production
+    host's egress (task ``M1-G``); this development machine shares that egress
+    with a still-running collector **of this same venue**, and M1-A6 sent no
+    request of any kind. Reading the tag here is where it will show up the day
+    ``M1-G`` overwrites these files and retags them ``live-recorded``.
+    """
+    document = json.loads(
+        (HYPERLIQUID_FIXTURES / f"{name}.json").read_text(encoding="utf-8")
+    )
+    assert document["source"] in {"documented", "live-recorded"}, document["source"]
+    return document["payload"]
+
+
+def hyperliquid_fixture_source(name: str) -> str:
+    document = json.loads(
+        (HYPERLIQUID_FIXTURES / f"{name}.json").read_text(encoding="utf-8")
+    )
+    source: str = document["source"]
+    return source
