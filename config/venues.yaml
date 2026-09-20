@@ -1,0 +1,304 @@
+# config/venues.yaml — rate limits and egress budget. Nothing else, on purpose.
+#
+# What lives here (M1-A2, the rate-limit ledger):
+#   * each venue's official rate limit, with a source tag on every constant;
+#   * the share of that limit the WHOLE egress IP may spend (docs/04 hard rule
+#     ②: 40 % for Binance, 90 % for Hyperliquid — a cap on the sum of every
+#     consumer on this IP, not an allowance for this project alone);
+#   * the budget policy of docs/03-ARCHITECTURE.md §6.1 per bucket: the
+#     resident floor `reserve`, the fast-lane floor, the opportunistic hard cap;
+#   * WebSocket connection and seat limits.
+#
+# What deliberately does NOT live here: endpoint URLs and base hosts, the coin
+# list, and the symbol mapping (1000PEPE <-> kPEPE). Those belong to the venue
+# adapters — build steps ⑤/⑥ of M1-A — and writing them here would make the
+# ledger look like something that knows how to call a venue. It is not: it does
+# accounting and admission only, and never sends a request (§6.1, seam ③).
+#
+# Source tags
+#   official   — the venue's own documentation says so (docs/04 tag `官方`)
+#   measured   — this project's own probe says so (docs/04 tag `实测`)
+#   unverified — neither; accounted conservatively (docs/04 tag `未验证`)
+#   derived    — computed inside docs/03 §6 / §6.1 from an official constant;
+#                the `doc:` key names the line it comes from.
+# AGENTS.md §2 lists only the first three. §6.1's budget table is full of
+# numbers that are none of them — 960 is not an official limit, it is
+# 2400 × 40 % — so tagging them `official` would be a lie and tagging them
+# `unverified` would hide that they are exact arithmetic. See the PR's
+# "Doc corrections".
+#
+# Every `*_ceiling_per_min` below is ALSO recomputed by the loader from
+# `official_limit_per_min × share`; a mismatch refuses to load. The number is
+# written out anyway so that a human reading this file sees the same figure as
+# the table in §6.1.
+
+schema: 1
+
+venues:
+
+  # ------------------------------------------------------------------ #
+  # Binance USDⓈ-M futures
+  # ------------------------------------------------------------------ #
+  binance:
+    aimd:
+      # §6: "任何 429 让 opportunistic 停 1 小时，resident 只降速（AIMD 砍到 75%）".
+      resident_factor_on_429:
+        value: 0.75
+        source: derived
+        doc: "03 §6.1 其余不变"
+      opportunistic_freeze_s:
+        value: 3600
+        source: derived
+        doc: "03 §6.1 其余不变"
+      # The decrease half of AIMD is specified; the increase half is not
+      # written down anywhere. These two are this task's own conservative
+      # choice: +5 % of the ceiling per quiet minute, so a single 429 costs
+      # ~5 minutes of full resident rate. Flagged in the PR.
+      resident_recovery_step:
+        value: 0.05
+        source: unverified
+        doc: "not in any document — chosen here"
+      resident_recovery_interval_s:
+        value: 60
+        source: unverified
+        doc: "not in any document — chosen here"
+      resident_factor_floor:
+        value: 0.25
+        source: unverified
+        doc: "not in any document — chosen here; bounds repeated decreases"
+      notify_f4_on_429:
+        # 03 §6.1 makes the F4 private message mandatory for Hyperliquid only.
+        # A Binance 429 still produces an ingest_gap(cause=rate_limit) event;
+        # it just does not wake anybody at 3 a.m. by itself. The 418 does.
+        value: false
+        source: derived
+        doc: "03 §6.1 共享出口的连带规则：该条只点名 HL 的 429"
+
+    buckets:
+
+      # REQUEST_WEIGHT. The one every /fapi/* call charges against.
+      fapi_weight:
+        kind: weight
+        official_limit_per_min:
+          value: 2400
+          source: official
+          doc: "04 §2 限速：REQUEST_WEIGHT 每 IP 2400/min，头 X-MBX-USED-WEIGHT-1M"
+        share:
+          value: 0.40
+          source: derived
+          doc: "04 开头硬规则 ② —— 出口 IP 合计上限，不是本项目可用量"
+        egress_ceiling_per_min:
+          value: 960
+          source: derived
+          doc: "03 §6.1 表第 1 行「出口合计上限（天花板）」= 2400 × 40 %"
+        resident_steady_per_min:
+          value: 241
+          source: derived
+          doc: "03 §6 车道表：premiumIndex 20 + 逐币 OI 180 + ticker24hr 40 + 元数据 1"
+        reserve_per_min:
+          # The resident FLOOR, not a cap: §6.1 "reserve 必须 ≥ resident 稳态用量".
+          value: 300
+          source: derived
+          doc: "03 §6.1 表：300/分 = 241 × 1.25（25 % 重试余量）"
+        fast_lane_floor_per_min:
+          value: 120
+          source: derived
+          doc: "03 §6.1 表：其中快道地板 120/分，任何时刻不被其余 resident 挤占"
+        opportunistic_hard_cap_per_min:
+          value: 200
+          source: derived
+          doc: "03 §6.1 表：硬顶 200/分（留 460 的退避余量）"
+        capacity_model:
+          # Only used to answer "how many coins fit" (§6). Not used for admission.
+          fixed_per_min:
+            value: 61
+            source: derived
+            doc: "03 §6：premiumIndex 20 + ticker24hr 40 + 元数据 1"
+          per_coin_per_min:
+            value: 1
+            source: derived
+            doc: "03 §6：每增一个币 = OI 1 权重/分"
+
+      # /futures/data/* — long/short ratios and openInterestHist.
+      # It charges NO weight and has its own request-count limit (§6).
+      futures_data:
+        kind: request
+        official_limit_per_min:
+          value: 200
+          source: official
+          doc: "04 §2：1000 次/5min = 200/min（官方页面明写；03 §6「唯一一个靠猜的常数」已作废）"
+        share:
+          value: 0.40
+          source: derived
+          doc: "04 开头硬规则 ②"
+        egress_ceiling_per_min:
+          value: 80
+          source: derived
+          doc: "03 §6.1 表第 2 行：200 × 40 % = 80 次/分"
+        resident_steady_per_min:
+          value: 54
+          source: derived
+          doc: "03 §6.1 表：54 次/分 = 3 类 × 180 币 ÷ 10 分钟"
+        reserve_per_min:
+          value: 60
+          source: derived
+          doc: "03 §6.1 表：60 = 54 + 6（11 % 重试余量；漏掉的点下一窗口 limit 自愈）"
+        fast_lane_floor_per_min:
+          # No fast lane runs on this bucket: the 10-minute ratio lane is a
+          # plain resident lane (§6 车道表). An explicit 0, not an omission.
+          value: 0
+          source: derived
+          doc: "03 §6 车道表：本桶上没有快道"
+        opportunistic_hard_cap_per_min:
+          value: 20
+          source: derived
+          doc: "03 §6.1 表：硬顶 20 —— 它现在等于算式结果 80 − max(60,54)"
+        capacity_model:
+          fixed_per_min:
+            value: 0
+            source: derived
+            doc: "03 §6：固定项 0"
+          per_coin_per_min:
+            value: 0.3
+            source: derived
+            doc: "03 §6：每增一个币 = 3 类 × 1 次/10 分钟 = 0.3 次/分"
+
+    ws:
+      # All three come from the pre-split WebSocket documentation. 04 §2 says
+      # in as many words that whether they survived the 2026-04-23 endpoint
+      # split was not re-verified → `unverified`, accounted at these numbers
+      # because they are the conservative reading.
+      max_new_connections_per_window:
+        value: 300
+        source: unverified
+        doc: "04 §2：每 IP 每 5min ≤300 次连接（拆分前文档，拆分后未复核）"
+      window_s:
+        value: 300
+        source: unverified
+        doc: "04 §2：同上，5 分钟窗口"
+      max_connection_age_s:
+        value: 86400
+        source: unverified
+        doc: "04 §2 / 03 §6：24h 强制断开，需主动轮换"
+      max_streams_per_connection:
+        value: 1024
+        source: unverified
+        doc: "04 §2：每连接 ≤1024 流（拆分前文档）"
+
+  # ------------------------------------------------------------------ #
+  # Hyperliquid
+  # ------------------------------------------------------------------ #
+  hyperliquid:
+    aimd:
+      resident_factor_on_429:
+        value: 0.75
+        source: measured
+        doc: "04 §3 实测 ④：撞 429 砍到 75%，冻结 1h"
+      opportunistic_freeze_s:
+        value: 3600
+        source: measured
+        doc: "04 §3 实测 ④"
+      resident_recovery_step:
+        value: 0.05
+        source: unverified
+        doc: "not in any document — chosen here"
+      resident_recovery_interval_s:
+        value: 60
+        source: unverified
+        doc: "not in any document — chosen here"
+      resident_factor_floor:
+        value: 0.25
+        source: unverified
+        doc: "not in any document — chosen here"
+      notify_f4_on_429:
+        # 03 §6.1: "任何一次 HL 429，新采集器除了自己退避，还必须发一条 F4 私聊"
+        # —— on a shared egress a 429 means another consumer may be getting hit
+        # too, so it is a thing a human has to look at, not a routine backoff.
+        value: true
+        source: derived
+        doc: "03 §6.1 共享出口的连带规则第 1 条"
+
+    buckets:
+
+      info_weight:
+        kind: weight
+        official_limit_per_min:
+          value: 1200
+          source: official
+          doc: "04 §3：/info 每 IP 1200 权重/min（实测容量更宽，记账仍按 1200）"
+        share:
+          value: 0.90
+          source: derived
+          doc: "04 开头硬规则 ②：HL 取官方 1200 的 90 %，仍是出口合计上限"
+        egress_ceiling_per_min:
+          value: 1080
+          source: derived
+          doc: "03 §6.1 表第 3 行 + §20 评审修正第 1 行：1200 × 90 % = 1080"
+        resident_steady_per_min:
+          value: 44
+          source: derived
+          doc: "03 §6.1 表第 3 行「M1+M2 实际用量 44/分」"
+        # This bucket has two budget profiles because §6.1 gives it two rows:
+        # one for the transition (hub_legacy still reserving 960 → we get 120)
+        # and one for after the legacy collector is retired (we get all 1080).
+        # The loader picks the profile with the largest `min_our_ceiling_per_min`
+        # that is <= our computed ceiling, so step ③ of §6.1's reclamation
+        # procedure (set hub_legacy to 0, re-run preflight) switches it with no
+        # code change.
+        profiles:
+          - name: transitional
+            min_our_ceiling_per_min: 0
+            reserve_per_min:
+              value: 60
+              source: derived
+              doc: "03 §6.1 表第 3 行：60/分（快道 40 + 元数据与重试 20）"
+            fast_lane_floor_per_min:
+              # §6.1 states a fast-lane floor only for the Binance weight
+              # bucket. 40 is the fast-lane term of THIS bucket's own reserve
+              # formula ("快道 40 + 元数据与重试 20"); without it the 30-second
+              # HL lane has no protection at all. Flagged in the PR.
+              value: 40
+              source: derived
+              doc: "03 §6.1 reserve 算式的快道项；§6.1 未直接给本桶的快道地板"
+            opportunistic_hard_cap_per_min:
+              value: 20
+              source: derived
+              doc: "03 §6.1 表：硬顶 20 权重/分，故意压得比算式（60）低"
+          - name: reclaimed
+            min_our_ceiling_per_min: 1080
+            reserve_per_min:
+              value: 200
+              source: derived
+              doc: "03 §6.1 表第 4 行（退役回收后）"
+            fast_lane_floor_per_min:
+              value: 40
+              source: derived
+              doc: "同上：快道用量不随回收变化"
+            opportunistic_hard_cap_per_min:
+              value: 400
+              source: derived
+              doc: "03 §6.1 表第 4 行（退役回收后）：硬顶 400/分"
+
+    ws:
+      # Seats are zero-sum across the egress IP (04 §4). 80 % of each official
+      # number, per 03 §6.1 表第 4 行.
+      max_connections:
+        value: 8
+        source: derived
+        doc: "03 §6.1 表：官方 10 连接 × 80 %"
+      max_subscriptions:
+        value: 800
+        source: derived
+        doc: "03 §6.1 表：官方 1000 订阅 × 80 %"
+      max_distinct_users:
+        value: 8
+        source: derived
+        doc: "03 §6.1 表：官方 10 个不同 user × 80 %（M5 才用得上）"
+      max_inflight:
+        value: 8
+        source: measured
+        doc: "04 §3 实测 ③：串行只用掉 25 % 预算，8 线程刚好打满"
+      max_inflight_hard_cap:
+        value: 10
+        source: measured
+        doc: "04 §3 实测 ②：max_inflight 硬顶 10，超过吞吐反降"
