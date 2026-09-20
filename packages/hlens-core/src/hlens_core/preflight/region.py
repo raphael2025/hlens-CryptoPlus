@@ -294,6 +294,20 @@ def check_capability_matrix(
             f"{row.completeness:<16}{pad(_availability_text(row), 12)}"
             f"{row.provenance.render()}"
         )
+    unresolved = [row for row in rows if row.available is not Status.GREEN]
+    if unresolved:
+        lines.append("")
+        lines.append("不是「可用」的每一行，各自的原因：")
+        seen: set[str] = set()
+        for row in sorted(unresolved, key=lambda item: (item.why, item.venue)):
+            if row.why in seen:
+                continue
+            seen.add(row.why)
+            names = ", ".join(
+                f"{item.venue}:{item.capability}" for item in unresolved if item.why == row.why
+            )
+            lines.append(f"  {row.why}")
+            lines.append(f"    -> {names}")
     lines.append("")
     lines.append("覆盖矩阵的最后一列是这一行结论的来源标签，按 AGENTS §2 继承输入里最弱的那个：")
     lines.append(
@@ -312,7 +326,7 @@ def check_capability_matrix(
         status, text, provenance = _feature_verdict(rule, available, country)
         feature_statuses.append(status)
         lines.append(
-            f"  {rule.feature:<5}{pad(rule.title, 48)}{pad(text, 26)}{provenance.render()}"
+            f"  {rule.feature:<5}{pad(rule.title, 48)}{pad(text, 30)}  {provenance.render()}"
         )
 
     blocking = [

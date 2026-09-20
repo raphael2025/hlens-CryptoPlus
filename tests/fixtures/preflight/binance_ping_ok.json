@@ -1,0 +1,6 @@
+{
+  "source": "documented",
+  "note": "docs/04-DATA-SOURCES.md §2 / §7: the cheapest Binance USDⓈ-M liveness probe (GET /fapi/v1/ping, W=1) answers 200 with an empty object. Hand-built from the document — M1-A3 sent no request (AGENTS §3.3: a live-recorded fixture is M1-G's job, from the production host's egress).",
+  "status_code": 200,
+  "payload": {}
+}
