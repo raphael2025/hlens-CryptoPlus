@@ -66,22 +66,85 @@ def test_every_reservation_carries_a_source_tag(consumers_path: Path) -> None:
                 assert body.get("source") in set(SourceTag), (consumer["name"], venue, name)
 
 
-def test_venues_yaml_holds_no_endpoint_no_host_and_no_coin_list(
+def _without_block(text: str, key: str) -> str:
+    """``text`` with every ``<key>:`` block removed — the key line and
+    everything indented under it."""
+    kept: list[str] = []
+    depth = 0
+    skipping = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if skipping:
+            if stripped and indent <= depth:
+                skipping = False
+            else:
+                continue
+        if stripped == f"{key}:":
+            skipping = True
+            depth = indent
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def test_venues_yaml_holds_hosts_only_under_endpoints_and_no_coin_list(
     venues_path: Path,
 ) -> None:
-    """Scope, stated as a test.
+    """Scope, stated as a test — **narrowed by M1-A5, not dropped.**
 
-    Endpoint URLs, base hosts and the symbol map belong to the adapters (build
-    steps ⑤/⑥), not to the ledger, and AGENTS §3 forbids a real hostname or
-    address anywhere in this repository outside the venue configuration this
-    file does not yet contain.
+    M1-A2 wrote this assertion as "no host anywhere in this file", with a
+    docstring that already anticipated "the venue configuration this file does
+    not yet contain". ``03`` §6.1 is where that configuration was always going
+    to land — "`config/venues.yaml` 里三个 base URL 分开配，标 `官方`" — and
+    AGENTS §2.3 forbids a hard-coded host anywhere else, so M1-A5 put the base
+    URLs under each venue's ``endpoints:`` key.
+
+    What the assertion protects is unchanged, and is now three things:
+
+    1. a host may appear **only** inside an ``endpoints:`` block;
+    2. endpoint **paths** still do not live here at all — a file that knew both
+       where a venue is and what to ask it would be a file that knows how to
+       call one, which is exactly what the ledger must not be;
+    3. no IP address, and no coin list or symbol map, anywhere.
     """
     text = venues_path.read_text(encoding="utf-8")
     body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    outside_endpoints = _without_block(body, "endpoints")
+
     for forbidden in ("http://", "https://", "wss://", "ws://", "@", ".com", ".xyz"):
-        assert forbidden not in body, f"{forbidden!r} does not belong in venues.yaml yet"
+        assert forbidden not in outside_endpoints, (
+            f"{forbidden!r} belongs under a venue's `endpoints:` key, nowhere else"
+        )
+    for path in ("/fapi/", "/futures/data/", "/api/v3/"):
+        assert path not in body, (
+            f"{path!r} is an endpoint path; paths stay with the adapter "
+            "(packages/hlens-core/src/hlens_core/adapters/<venue>/endpoints.py). "
+            "Hyperliquid's `/info` is named in a `doc:` citation, which is a "
+            "quotation of 04 §3 rather than something the loader could call"
+        )
     assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", body), "no IP addresses in the repo"
     assert "BTC" not in body and "symbol" not in body.lower()
+
+
+def test_every_endpoint_constant_is_a_tagged_official_url(venues_path: Path) -> None:
+    """``03`` §6.1: the base URLs are configured "标 `官方`".
+
+    A ``measured`` or ``unverified`` host would mean somebody worked out where
+    the exchange is by connecting to it, which is not how this repository finds
+    anything out (AGENTS §2.2, ``04`` §11's on-machine rule).
+    """
+    document = yaml.safe_load(venues_path.read_text(encoding="utf-8"))
+    seen = 0
+    for venue, body in document["venues"].items():
+        for name, constant in (body.get("endpoints") or {}).items():
+            seen += 1
+            where = f"venues.{venue}.endpoints.{name}"
+            assert constant["source"] == "official", f"{where} is not tagged 官方"
+            assert constant["value"].startswith(("https://", "wss://")), where
+            assert not constant["value"].endswith("/"), f"{where} has a trailing slash"
+            assert constant["doc"], f"{where} has no citation"
+    assert seen >= 4, "the Binance base URLs (04 §2's three WS groups + REST) are missing"
 
 
 # --------------------------------------------------------------------------- #

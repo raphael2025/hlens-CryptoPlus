@@ -1,0 +1,58 @@
+{
+  "source": "documented",
+  "endpoint": "!forceOrder@arr on the /market group",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 2. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), and M1-A5 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. Bare frames, one per message. The third is a symbol the mapping does not know. 04 2: the venue pushes at most one forced order per symbol per second, so this is a lower bound.",
+  "payload": [
+    {
+      "e": "forceOrder",
+      "E": 1789819200012,
+      "o": {
+        "s": "BTCUSDT",
+        "S": "SELL",
+        "o": "LIMIT",
+        "f": "IOC",
+        "q": "0.014",
+        "p": "63980.00",
+        "ap": "63975.30",
+        "X": "FILLED",
+        "l": "0.014",
+        "z": "0.014",
+        "T": 1789819200000
+      }
+    },
+    {
+      "e": "forceOrder",
+      "E": 1789819201008,
+      "o": {
+        "s": "1000PEPEUSDT",
+        "S": "BUY",
+        "o": "LIMIT",
+        "f": "IOC",
+        "q": "120000",
+        "p": "0.00991000",
+        "ap": "0.00990800",
+        "X": "FILLED",
+        "l": "120000",
+        "z": "120000",
+        "T": 1789819201000
+      }
+    },
+    {
+      "e": "forceOrder",
+      "E": 1789819202004,
+      "o": {
+        "s": "NEWCOINUSDT",
+        "S": "SELL",
+        "o": "LIMIT",
+        "f": "IOC",
+        "q": "10",
+        "p": "1.21000000",
+        "ap": "1.20980000",
+        "X": "FILLED",
+        "l": "10",
+        "z": "10",
+        "T": 1789819202000
+      }
+    }
+  ]
+}

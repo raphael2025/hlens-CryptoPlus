@@ -3,7 +3,9 @@ moves when a test moves it."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -66,3 +68,30 @@ def clock() -> FakeClock:
 @pytest.fixture
 def ledger(config: LedgerConfig, clock: FakeClock) -> RateLimitLedger:
     return RateLimitLedger(config, clock=clock)
+
+
+# --------------------------------------------------------------------------- #
+# M1-A5 — the Binance adapter's offline fixtures
+# --------------------------------------------------------------------------- #
+BINANCE_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "binance"
+
+
+def binance_payload(name: str) -> Any:
+    """One trimmed Binance fixture's payload, checked for its provenance tag.
+
+    Every file under ``tests/fixtures/binance/`` is tagged ``source:
+    documented`` and hand-built from ``docs/04-DATA-SOURCES.md`` §2's field
+    table. AGENTS §3.3 requires a *recording* to be made from the production
+    host's egress (task ``M1-G``), and M1-A5 sent no request of any kind;
+    reading the tag here is where it will show up the day ``M1-G`` overwrites
+    these files with real recordings and retags them ``live-recorded``.
+    """
+    document = json.loads((BINANCE_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+    assert document["source"] in {"documented", "live-recorded"}, document["source"]
+    return document["payload"]
+
+
+def binance_fixture_source(name: str) -> str:
+    document = json.loads((BINANCE_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+    source: str = document["source"]
+    return source

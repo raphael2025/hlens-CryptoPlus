@@ -1,0 +1,21 @@
+{
+  "source": "documented",
+  "endpoint": "/futures/data/globalLongShortAccountRatio",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 2. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), and M1-A5 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. Two 5-minute points, which is what one 10-minute poll with `limit` brings back (decision A8).",
+  "payload": [
+    {
+      "symbol": "BTCUSDT",
+      "longShortRatio": "1.8105",
+      "longAccount": "0.6442",
+      "shortAccount": "0.3558",
+      "timestamp": 1789818600000
+    },
+    {
+      "symbol": "BTCUSDT",
+      "longShortRatio": "1.7921",
+      "longAccount": "0.6418",
+      "shortAccount": "0.3582",
+      "timestamp": 1789818900000
+    }
+  ]
+}

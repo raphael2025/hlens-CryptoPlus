@@ -17,8 +17,16 @@ description = "Normalized data contracts shared by every hlens CryptoPlus module
 license = "MIT"
 requires-python = ">=3.12"
 # pyyaml: the ledger reads config/venues.yaml and config/egress-consumers.yaml
-# (03 §6.1). Version from the §3 lock table, constrained in the workspace root.
-dependencies = ["pydantic==2.13.5", "pyyaml==6.0.3"]
+# (03 §6.1), and the Binance adapter reads the base URLs out of the same file.
+# httpx + websockets: M1-A5's venue adapter is the first thing here that opens
+# a socket; both were already in the §3 lock table, so this only declares what
+# the package actually imports. Versions constrained in the workspace root.
+dependencies = [
+  "pydantic==2.13.5",
+  "pyyaml==6.0.3",
+  "httpx==0.28.1",
+  "websockets==17.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hlens_core"]

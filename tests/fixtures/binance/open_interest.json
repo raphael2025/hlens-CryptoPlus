@@ -1,0 +1,10 @@
+{
+  "source": "documented",
+  "endpoint": "/fapi/v1/openInterest",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 2. NOT a recording: AGENTS 3.3 requires fixtures to be recorded from the production host's egress (task M1-G), and M1-A5 sent no request of any kind. M1-G overwrites this file with a real trimmed recording and retags it `live-recorded`. Quantity is in units of the LISTED contract, i.e. thousands of PEPE.",
+  "payload": {
+    "symbol": "1000PEPEUSDT",
+    "openInterest": "1250000.000",
+    "time": 1789819200000
+  }
+}
