@@ -77,6 +77,10 @@ def test_the_ledger_imports_no_client_and_no_driver() -> None:
                 names = [alias.name.split(".")[0] for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
                 names = [node.module.split(".")[0]]
+            else:
+                # Narrows `node` to the two import statements, which are the
+                # only nodes that carry a line number worth reporting.
+                continue
             offences.extend(
                 f"{path.name}:{node.lineno}: {name}" for name in names if name in forbidden
             )
