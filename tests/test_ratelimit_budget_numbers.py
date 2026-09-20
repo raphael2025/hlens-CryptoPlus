@@ -24,6 +24,7 @@ from hlens_core.ratelimit import BucketKind, BurstShaper, LedgerConfig
 
 BINANCE_WEIGHT = "binance:fapi_weight"
 FUTURES_DATA = "binance:futures_data"
+FUNDING_RATE = "binance:funding_rate"
 HL_WEIGHT = "hyperliquid:info_weight"
 
 
@@ -58,6 +59,70 @@ def test_the_two_bucket_kinds_are_accounted_separately(config: LedgerConfig) -> 
     assert config.bucket(BINANCE_WEIGHT).kind is BucketKind.WEIGHT
     assert config.bucket(HL_WEIGHT).kind is BucketKind.WEIGHT
     assert config.bucket(FUTURES_DATA).kind is BucketKind.REQUEST
+    assert config.bucket(FUNDING_RATE).kind is BucketKind.REQUEST
+
+
+# --------------------------------------------------------------------------- #
+# M1-A2b — the fourth bucket: Binance `fundingRate` / `fundingInfo`
+# --------------------------------------------------------------------------- #
+def test_funding_rate_ceiling_is_40_requests(config: LedgerConfig) -> None:
+    """04 §4: 500 次/5min = 100 次/分 official, 40 % 红线 → **40 次/分**."""
+    bucket = config.bucket(FUNDING_RATE)
+    assert bucket.official_limit_per_min == 100
+    assert bucket.share == Fraction(2, 5)
+    assert bucket.egress_ceiling_per_min == 40
+
+
+def test_funding_rate_resident_steady_is_1(config: LedgerConfig) -> None:
+    """03 §6 车道表「1h/8h/冷启动」行: fundingRate 每 8h 对账 + fundingInfo 每
+    1h + 冷启动一次，04 §4 记为「<1 次/分」；loader 只吃整数，向上取整为 1。
+    """
+    bucket = config.bucket(FUNDING_RATE)
+    assert bucket.resident_steady_per_min == 1
+
+
+def test_funding_rate_reserve_is_2(config: LedgerConfig) -> None:
+    """套用 ``futures_data`` 的公式 reserve = resident + ceil(resident × 11%):
+    ceil(1 × 0.11) = 1 → reserve = 1 + 1 = **2**."""
+    bucket = config.bucket(FUNDING_RATE)
+    assert bucket.reserve_per_min == 1 + 1 == 2
+
+
+def test_funding_rate_opportunistic_is_38_and_the_cap_equals_the_formula(
+    config: LedgerConfig,
+) -> None:
+    """§6.1 公式：40 − max(2, 1) = **38 次/分**；跟随 ``futures_data`` 的先例，
+    硬顶直接等于算式结果。"""
+    bucket = config.bucket(FUNDING_RATE)
+    assert bucket.opportunistic_formula_per_min(1) == 38
+    assert bucket.opportunistic_hard_cap_per_min == 38
+    assert bucket.opportunistic_available(1) == 38
+
+
+def test_funding_rate_has_no_fast_lane(config: LedgerConfig) -> None:
+    """本桶只出现在 1h/8h/冷启动行，没有 ≤60s 快道，同 ``futures_data``。"""
+    assert config.bucket(FUNDING_RATE).fast_lane_floor_per_min == 0
+
+
+def test_funding_rate_and_futures_data_fit_together_even_if_they_are_secretly_one_bucket(
+    config: LedgerConfig,
+) -> None:
+    """04 §11 第 10 项: `futures_data`(1000 次/5min) 与 `fundingRate`
+    (500 次/5min) 是否共用同一个计数器，官方两页各自独立写限额、未说明关系
+    → `unverified`（见 venues.yaml 里 `funding_rate` 桶顶部的注释）。本仓库把
+    它们建模成两个独立的桶，M1-G 上机录 fixture 时才能实测确认。
+
+    这条测试是"猜错了也不会咬人"的证明：即使实测发现两者其实共用同一个物理
+    计数器，把两桶现在的稳态用量合并在一起看，仍然远低于 `futures_data` 自己
+    40 % 红线下的 80 次/分天花板 —— 建模成独立桶这件事本身不会把生产账本推
+    过线。
+    """
+    futures_data = config.bucket(FUTURES_DATA)
+    funding_rate = config.bucket(FUNDING_RATE)
+    combined_steady = futures_data.resident_steady_per_min + funding_rate.resident_steady_per_min
+    assert combined_steady == 54 + 1 == 55
+    assert combined_steady <= 80
+    assert combined_steady <= futures_data.egress_ceiling_per_min
 
 
 # --------------------------------------------------------------------------- #

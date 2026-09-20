@@ -230,5 +230,6 @@ def test_venues_config_loads_on_its_own(venues_path: Path) -> None:
     assert {str(key) for key in venues.bucket_keys()} == {
         "binance:fapi_weight",
         "binance:futures_data",
+        "binance:funding_rate",
         "hyperliquid:info_weight",
     }

@@ -59,6 +59,15 @@ consumers:
             /futures/data/* (03 §6.1 表第 2 行).
           checked_by: preflight_each_start
           doc: "03 §6.1 表第 2 行：留给 hub 旧采集器 0"
+        funding_rate:
+          reserved_per_min: 0
+          source: unverified
+          assertion: >-
+            hub_legacy collects Hyperliquid only and never calls Binance's
+            fundingRate/fundingInfo endpoints (same "只采 Hyperliquid" claim
+            as the other two Binance buckets above).
+          checked_by: preflight_each_start
+          doc: "M1-A2b：新增桶，沿用 03 §6.1 表第 1/2 行同一条断言"
 
       hyperliquid:
         info_weight:
@@ -115,6 +124,13 @@ consumers:
           checked_by: pytest_addopts_not_live
           doc: "03 §6.1 最后一条 + 03 §8"
         futures_data:
+          reserved_per_min: 0
+          source: derived
+          assertion: >-
+            dev's live budget is 0; see above.
+          checked_by: pytest_addopts_not_live
+          doc: "03 §6.1 最后一条"
+        funding_rate:
           reserved_per_min: 0
           source: derived
           assertion: >-

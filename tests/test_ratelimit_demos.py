@@ -30,6 +30,7 @@ from hlens_core.ratelimit import (
 
 BINANCE_WEIGHT = "binance:fapi_weight"
 FUTURES_DATA = "binance:futures_data"
+FUNDING_RATE = "binance:funding_rate"
 HL_WEIGHT = "hyperliquid:info_weight"
 
 
@@ -53,8 +54,8 @@ def test_demo_one_a_418_stops_every_lane_of_that_venue(
     ledger = RateLimitLedger(config, clock=clock)
 
     print("\n=== DEMO 1: one 418 on binance:futures_data ===")
-    print("before: every lane of both Binance buckets is open")
-    for key in (BINANCE_WEIGHT, FUTURES_DATA, HL_WEIGHT):
+    print("before: every lane of every Binance bucket is open")
+    for key in (BINANCE_WEIGHT, FUTURES_DATA, FUNDING_RATE, HL_WEIGHT):
         for priority in Priority:
             grant = ledger.acquire(key, cost=1, priority=priority)
             print(f"  acquire {key:26} {priority.value:14} -> granted={grant.granted}")
@@ -64,8 +65,8 @@ def test_demo_one_a_418_stops_every_lane_of_that_venue(
     print("\nfeeding a 418 with Retry-After: 120 to binance:futures_data")
     ledger.observe_response(FUTURES_DATA, status=418, retry_after_s=120)
 
-    print("after: every lane of BOTH Binance buckets is stopped")
-    for key in (BINANCE_WEIGHT, FUTURES_DATA):
+    print("after: every lane of every Binance bucket is stopped")
+    for key in (BINANCE_WEIGHT, FUTURES_DATA, FUNDING_RATE):
         for priority in Priority:
             grant = ledger.acquire(key, cost=1, priority=priority)
             print(
