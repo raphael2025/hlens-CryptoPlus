@@ -212,14 +212,38 @@ venues:
           source: derived
           doc: "03 §6 车道表：本桶（同 futures_data）上没有快道"
         opportunistic_hard_cap_per_min:
-          value: 38
+          # M1-A2c: pressed down from the formula's 38 to 5. §6.1's formula
+          # (available = ceiling − max(reserve, resident 实际用量) =
+          # 40 − max(2, 1) = 38) is still correct arithmetic on the assumption
+          # that `futures_data` and `funding_rate` are separate counters — but
+          # 04 §11 第 10 项 lists that assumption as `未验证`: the two official
+          # pages each give their own limit with no cross-reference, and this
+          # repo has no on-machine test of whether they are actually the same
+          # bucket. If they are the same counter, both sides filling their
+          # opportunistic lane at once sums to (54+20)+(1+38) = 113 against the
+          # `futures_data` ceiling of 80 — a 41 % overshoot, and on a shared
+          # egress IP that is a 429 → 418 that bans the whole machine and takes
+          # the still-running legacy collector down with it.
+          #
+          # Same move as `hyperliquid:info_weight`'s transitional profile just
+          # above in this file: pressed below the algebra on purpose because
+          # filling it would push the (possibly shared) resource to its
+          # ceiling with no backoff headroom left, not because the formula is
+          # wrong.
+          #
+          #   80  (futures_data 天花板)
+          #  − 54 (futures_data 稳态)
+          #  − 20 (futures_data opportunistic 硬顶)
+          #  −  1 (funding_rate 稳态)
+          #  =  5
+          #
+          # Release condition: this may be raised back to 38 (the formula's
+          # own answer) only after M1-G's on-machine fixture recording (§11
+          # 第 10 项) confirms `futures_data` and `funding_rate` are in fact
+          # independent counters. Not before — do not guess this one back up.
+          value: 5
           source: derived
-          doc: >-
-            03 §6.1 公式（评审修正版）：available = ceiling − max(reserve,
-            resident 实际用量) = 40 − max(2, 1) = 38。跟随 `futures_data` 的
-            先例，硬顶直接等于算式结果，不像 Binance 权重桶那样额外压低留退避
-            余量 —— 这一桶的量级（个位数/分）本身就远低于天花板，没有需要额外
-            压低的理由。
+          doc: "03 §6.1 公式给 38；本任务 (M1-A2c) 压到 5，见上方长注释"
 
     ws:
       # All three come from the pre-split WebSocket documentation. 04 §2 says
