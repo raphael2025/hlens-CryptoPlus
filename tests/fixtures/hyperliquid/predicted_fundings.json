@@ -1,0 +1,51 @@
+{
+  "source": "documented",
+  "endpoint": "POST /info {\"type\":\"predictedFundings\"}",
+  "note": "Hand-built from docs/04-DATA-SOURCES.md 3, which describes this response as 各所预测费率（含 Binance 的预测值）and names NONE of the per-venue keys - so the key spellings here are unverified and M1-G confirms them (see the PR's Doc corrections). NOT a recording: see tests/fixtures/hyperliquid/meta.json for why (AGENTS 3.3). The first row carries another venue's prediction on purpose: a Hyperliquid adapter must never emit a Binance record, so that entry is skipped and counted. The third coin is one the symbol table does not know.",
+  "payload": [
+    [
+      "BTC",
+      [
+        [
+          "BinPerp",
+          {
+            "fundingRate": "0.00010000",
+            "nextFundingTime": 1789833600000,
+            "fundingIntervalHours": 8
+          }
+        ],
+        [
+          "HlPerp",
+          {
+            "fundingRate": "0.0000138",
+            "nextFundingTime": 1789822800000
+          }
+        ]
+      ]
+    ],
+    [
+      "kPEPE",
+      [
+        [
+          "HlPerp",
+          {
+            "fundingRate": "-0.0000071",
+            "nextFundingTime": 1789822800000
+          }
+        ]
+      ]
+    ],
+    [
+      "NEWCOIN",
+      [
+        [
+          "HlPerp",
+          {
+            "fundingRate": "0.0000200",
+            "nextFundingTime": 1789822800000
+          }
+        ]
+      ]
+    ]
+  ]
+}

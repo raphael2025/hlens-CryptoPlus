@@ -434,3 +434,32 @@ venues:
         value: 10
         source: measured
         doc: "04 §3 实测 ②：max_inflight 硬顶 10，超过吞吐反降"
+
+    # ---------------------------------------------------------------- #
+    # Base URLs (M1-A6), same exception and same reasoning as Binance's
+    # block above: `03 §6.1` requires base URLs to live in this file and
+    # AGENTS §2.3 bans hard-coded hosts everywhere else. Hosts only — the
+    # `/info` PATH and the request `type` strings stay with the adapter
+    # (`adapters/hyperliquid/endpoints.py`), so this file still knows
+    # where the venue is and not how to call it. The ledger's loader
+    # ignores this key.
+    #
+    # Hyperliquid has ONE REST host and ONE WebSocket address: unlike
+    # Binance it published no 2026-04-23 split and no regional mirror, so
+    # there is no second entry here and no `mirror` switch on the
+    # adapter. `04 §6` records `api.hyperliquid.xyz` reachable from both
+    # a US and a non-US egress (200 / 200), which is why the mirror
+    # question does not arise on this venue.
+    endpoints:
+      rest:
+        value: "https://api.hyperliquid.xyz"
+        source: official
+        doc: >-
+          04 §3：POST {rest}/info 是全部行情读接口的唯一入口（`type` 字段选
+          端点）。路径与 type 名在适配器里，这里只有主机。
+      ws:
+        value: "wss://api.hyperliquid.xyz/ws"
+        source: official
+        doc: >-
+          04 §3：单一 WS 地址，全部频道共用；官方上限 10 连接 / 1000 订阅
+          见上面的 `ws:` 段（本项目按 80 % 记账）。

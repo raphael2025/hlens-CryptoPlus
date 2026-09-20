@@ -1,0 +1,25 @@
+{
+  "source": "documented",
+  "endpoint": "POST /info {\"type\":\"fundingHistory\",\"coin\":\"kPEPE\",\"startTime\":...}",
+  "note": "Hand-built from the field table in docs/04-DATA-SOURCES.md 3 (fundingRate, premium, time). NOT a recording: see tests/fixtures/hyperliquid/meta.json for why (AGENTS 3.3, task M1-G). Three consecutive HOURLY settlements - Hyperliquid funds every hour (04 3/5), so these are one hour apart and grid_s is 3600, not Binance's 28800. The rates are the venue's raw hourly values and are never pre-converted to an 8-hour basis.",
+  "payload": [
+    {
+      "coin": "kPEPE",
+      "fundingRate": "-0.00000625",
+      "premium": "-0.00005",
+      "time": 1789808400000
+    },
+    {
+      "coin": "kPEPE",
+      "fundingRate": "0.00001250",
+      "premium": "0.00012",
+      "time": 1789812000000
+    },
+    {
+      "coin": "kPEPE",
+      "fundingRate": "0.00000000",
+      "premium": "0.0",
+      "time": 1789815600000
+    }
+  ]
+}

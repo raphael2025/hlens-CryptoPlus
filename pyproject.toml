@@ -142,6 +142,13 @@ ban-relative-imports = "parents"
 # `hlens_core.adapters.{symbols,capabilities,admission,base}`, which is
 # `owner == target` and not an edge at all — ALLOWED_EDGES is untouched.
 "packages/hlens-core/src/hlens_core/adapters/binance/*" = ["TID251"]
+# M1-A6 adds `adapters/hyperliquid/`, the sibling of `adapters/binance/` above,
+# and needs its own line for the same reason: ruff's glob does not cross a `/`.
+# Same non-change, too — these modules import
+# `hlens_core.adapters.{symbols,capabilities,admission,base}`, which is
+# `owner == target` and not an edge at all. ALLOWED_EDGES in
+# tests/test_module_boundaries.py is untouched by this task.
+"packages/hlens-core/src/hlens_core/adapters/hyperliquid/*" = ["TID251"]
 "packages/hlens-core/src/hlens_core/wallet/*" = ["TID251"]
 # A module's offline tests have to import the module they test. Tests are not
 # modules: they are not scanned by the boundary test (it walks `packages/`
