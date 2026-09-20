@@ -17,9 +17,16 @@
 
 | # | 任务 | 角色 / 模型 | 状态 | 备注 |
 |---|---|---|---|---|
-| M1-A | 采集核心六步：归一化契约 · 限速预算（含共用出口的 `reserved` 扣减）· preflight · 适配器协议与能力声明 · Binance 行情适配器 · Hyperliquid 行情适配器 | backend-dev / Opus | 待办 | 完成后由 `reviewer` 独立过一遍。接缝 ①②⑤ |
-| M1-B | **在 hub 上清点家底**（上机第一步） | data-engineer / Sonnet | 待办 | 磁盘 · CPU · 内存 · 旧采集器采哪个所、占多少 HL WS 连接与 user 席位 · **读它自身账本测出实际权重占用**（不得为此打交易所），结果填 `config/egress-consumers.yaml` 并回填 `03 §6.1` 的占位值 |
-| M1-C | 建表与迁移（高频表只写文档不建） | backend-dev / Opus | 待办 | 接缝 ④。实测单行字节数须在 ≥100 万行、经历过覆盖式 upsert 与 VACUUM 之后测 |
+| M1-A1 | ⓪ 仓库骨架 + 版本锁定 + 接缝③ 边界测试 · ① 归一化契约 | backend-dev / Opus | **已合** | PR #3 → `f972f28`。接缝 ①③ |
+| M1-A2 | ② 限速账本（两类桶 · 三层优先级 · AIMD · 418 行为 · 共用出口的 `reserved` 扣减） | backend-dev / Opus | **已合** | PR #4 → `43439fe` |
+| M1-A2b | 补第四个桶：Binance `fundingRate`/`fundingInfo` 请求桶 | backend-dev / Sonnet | **已合** | PR #6 → `e4c99d8`。M1-A2 只建了三个桶，`03 §6` 车道表与 `04 §12 第 6 项` 都点了这个桶的名 |
+| M1-A2c | 压住 `funding_rate` 桶的 opportunistic 硬顶 38 → 5 | backend-dev / Sonnet | **已合** | PR #7 → `2db021e`。| 「与 `futures_data` 是否同桶」`未验证`；两边吃满 = 113 > 80 红线。解除条件写在 `03 §6.1` |
+| M1-A3 | ③ preflight CLI | backend-dev / Opus | **阻塞** | 等 `M1-B` 的实测值——验收要打印共享出口的扣减表，而 HL 那一行现在还是 `960` 占位 |
+| M1-A4 | ④ 适配器协议与能力声明 · 接缝⑤ 的 `wallet/base.py` | backend-dev / Opus | **已合** | PR #5 → `59d2be0`。限速准入用依赖倒置解决，`ALLOWED_EDGES` 零改动。接缝 ②⑤ |
+| M1-A5 | ⑤ Binance 行情适配器（WS 用 `/market` 组） | backend-dev / Opus | **已合** | PR #9 → `58bba99`。未拆：A4 的 `CapabilitySet` 要求 13 项一次填满，切开会让第二步回头改第一步的声明 |
+| M1-A6 | ⑥ Hyperliquid 行情适配器 | backend-dev / Opus | **已合** | PR #10 → `39b3f50`。多空比 / 主动买卖比 / 爆仓流三项 `unsupported`，未派生替代品；`klines` 诚实标 `partial_history`（`candleSnapshot` 只留最近 5000 根） |
+| M1-B | **在 hub 上清点家底**（上机第一步） | data-engineer / **Opus** | 进行中 | 磁盘 · CPU · 内存 · 旧采集器采哪个所、占多少 HL WS 连接与 user 席位 · **读它自身账本测出实际权重占用**（不得为此打交易所），结果填 `config/egress-consumers.yaml` 并回填 `03 §6.1` 的占位值 |
+| M1-C | 建表与迁移（高频表只写文档不建） | backend-dev / Opus | 待办 | 接缝 ④。实测单行字节数须在 ≥100 万行、经历过覆盖式 upsert 与 VACUUM 之后测。**硬性交付项**：必须写明 `oi_usd` 在哪里算（入库边界 vs `compute` 层）以及快慢两道先到后到时的取值语义——`oi_usd` 属慢道而它的因子 `mark` 属快道，而三条 upsert 语句永不合并（`03 §5`）。没有这个答案不得开工 |
 | M1-D | `universe` | backend-dev / Sonnet | 待办 | 币清单 150–200 个 |
 | M1-E | `collector` + `health` | backend-dev / Opus | 待办 | 本机跑 10 分钟；**本机两所 live 预算为 0**（与 hub 同出口） |
 | M1-F | Compose 上 hub + preflight | backend-dev / Sonnet | 阻塞 | 卡在 RB-2 域名。preflight 须打出预算扣减表与区域能力矩阵 |
