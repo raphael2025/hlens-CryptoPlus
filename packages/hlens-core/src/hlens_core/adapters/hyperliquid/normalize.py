@@ -533,10 +533,16 @@ def normalize_candle_snapshot(
 
     ``04`` §3's field list is ``t,o,h,l,c,v,n``. Only the close price and the
     close instant have a column in ``03`` §5; the rest is dropped rather than
-    parked somewhere plausible. The close instant is the response's ``T`` when
-    it is there and ``t + grid_s`` when it is not — ``04`` §3's list names only
-    the open time, so the fallback is the interval's own arithmetic rather than
-    a field we are assuming exists. Reported in "Doc corrections".
+    parked somewhere plausible.
+
+    The close instant is the response's ``T`` when it is there and the
+    interval's own arithmetic when it is not — ``04`` §3's list names only the
+    open time, so the fallback exists rather than a field being assumed
+    (reported in "Doc corrections"). The fallback is ``t + grid_s − 1 ms``,
+    **not** ``t + grid_s``: the venue's own ``T`` is the last millisecond
+    inside the bar, and a fallback that landed on the next bar's open instead
+    would give the same bar two different ``ts`` depending on which path
+    produced it — which §5's upsert would then store as two rows.
 
     The bar still forming is discarded: a partial bar's close is not a close,
     and writing it would put a number that is about to change into a row F8
@@ -559,7 +565,7 @@ def normalize_candle_snapshot(
         close_time = (
             _ms(closed, field=f"candleSnapshot[{index}].T")
             if closed is not None
-            else _ms(entry.get("t"), field=f"candleSnapshot[{index}].t") + grid_s * 1000
+            else _ms(entry.get("t"), field=f"candleSnapshot[{index}].t") + grid_s * 1000 - 1
         )
         if close_time >= now_ms:
             continue

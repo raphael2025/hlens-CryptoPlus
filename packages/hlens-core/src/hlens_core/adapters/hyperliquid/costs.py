@@ -35,18 +35,28 @@ The weights (``04`` §3)
 * every other documented request: **20**. That is ``meta``,
   ``metaAndAssetCtxs``, ``predictedFundings``, ``fundingHistory`` and
   ``candleSnapshot``;
-* **plus, on the historical ones, 1 per 20 rows returned** — 1 per **60** for
-  ``candleSnapshot``.
+* **the historical ones are charged by the row**: 1 per 20 rows returned, and
+  1 per **60** for ``candleSnapshot``. Not a flat price — a 500-row page and a
+  20-row page are not the same call.
 
-That last line is read here as an *addition* to the flat 20, which is what
-``04`` §3's prose says ("其余文档化请求一律 20；历史类每 20 条 +1"); ``04``
-§3's table column for ``fundingHistory`` gives only the per-row half, so the
-two readings differ by a constant 20 per call. :func:`funding_history_weight`
-and :func:`candle_snapshot_weight` take the larger one, deliberately: on a
-shared egress with no response header to check the answer against, the cost of
-over-accounting is a slower backfill and the cost of under-accounting is a 429
-that also lands on somebody else. Listed in the PR's "Doc corrections" so the
-ambiguity is resolved in ``04`` rather than re-decided in the next adapter.
+``04`` §3 can be read two ways on that last line: its table's weight column for
+``fundingHistory`` gives only "每 20 条 +1", while its prose ("其余文档化请求一律
+20；历史类每 20 条 +1") could be read as that *plus* the flat 20. The two differ
+by a constant 20 per call, Hyperliquid sends no header that could settle it, and
+guessing low on a shared egress is how somebody else gets a 429 — so it was
+worth settling rather than choosing. **``03`` §6.1's own arithmetic settles
+it**: F11's two-year funding backfill is sized there at "157,680 权重", and
+157,680 is exactly ``(2 × 365 × 24 rows ÷ 20) × 180 coins`` with no per-call
+constant at all (the flat-20 reading gives ~284,000). So the per-row figure is
+the whole weight, and that is what :func:`funding_history_weight` returns.
+
+**One consequence worth knowing before writing a backfill loop**: a full
+500-row ``fundingHistory`` page costs 25, and the transitional opportunistic
+hard cap on this bucket is **20 weight a minute** (``03`` §6.1, pressed below
+the formula on purpose). A single full page therefore never fits, and the
+ledger denies it outright rather than throttling it — the backfill has to page
+at **≤ 400 rows**, which is what makes ``03`` §6.1's "157,680 ÷ 20 ≈ 5.5 天"
+achievable rather than impossible. Reported in the PR.
 """
 
 from __future__ import annotations
@@ -186,19 +196,21 @@ def _rows_weight(rows: int | None, *, per_weight: int) -> int:
 
 
 def funding_history_weight(rows: int | None) -> int:
-    """``04`` §3: 20 for the request, **plus 1 per 20 rows**.
+    """``04`` §3: **1 per 20 rows**, and that is the whole weight.
 
-    See the module docstring for why the flat 20 is included: ``04`` §3's prose
-    and its table disagree by exactly that constant, Hyperliquid sends no
-    header that could settle it, and the egress is shared with another consumer
-    of this same venue.
+    Not the flat :data:`INFO_REQUEST_WEIGHT` and not it plus this — see the
+    module docstring for why ``03`` §6.1's F11 figure settles a question ``04``
+    §3 leaves open. A full 500-row page is 25, which is above the transitional
+    opportunistic hard cap of 20, so a backfill pages at ≤ 400 rows.
     """
-    return INFO_REQUEST_WEIGHT + _rows_weight(rows, per_weight=HISTORY_ROWS_PER_WEIGHT)
+    return _rows_weight(rows, per_weight=HISTORY_ROWS_PER_WEIGHT)
 
 
 def candle_snapshot_weight(rows: int | None) -> int:
-    """``04`` §3: 20 for the request, **plus 1 per 60 candles**."""
-    return INFO_REQUEST_WEIGHT + _rows_weight(rows, per_weight=CANDLE_ROWS_PER_WEIGHT)
+    """``04`` §3: **1 per 60 candles** — a different divisor from every other
+    historical endpoint, and the kind of detail that is only ever wrong in one
+    direction. A full 500-candle page is 9."""
+    return _rows_weight(rows, per_weight=CANDLE_ROWS_PER_WEIGHT)
 
 
 def cost_of_call(
@@ -272,7 +284,7 @@ def cost_of_call(
         lane=lane,
         endpoint=(
             f"{INFO_PATH} (type={request_type}, rows={asked}, "
-            f"04 §3: {INFO_REQUEST_WEIGHT} + 1 per {detail} -> W={weight})"
+            f"04 §3: 1 per {detail} -> W={weight})"
         ),
     )
 
