@@ -33,6 +33,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Final
 
+from hlens_core.contracts import Venue
+
 from .facts import TAILSCALE_INTERFACE, HostFacts
 from .provenance import Provenance, Qualifier, Tag
 from .rows import EGRESS_CHANGE, IngestGapRow
@@ -266,7 +268,13 @@ def _check_hash(
             provenance=Provenance.of(Tag.MEASURED),
         ),
         IngestGapRow(
-            venue="*",
+            # A change of public IP is not one venue's gap: every reservation
+            # in `egress-consumers.yaml` was a statement about that address, so
+            # both venues are affected at once. §5 defines exactly one value
+            # for "this record is about more than one venue" — the contracts'
+            # cross-venue marker — and this is the one import preflight is
+            # allowed to make (seam ③: every module may import `contracts`).
+            venue=Venue.CROSS.value,
             metric=EGRESS_METRIC,
             from_ts=now_ms,
             to_ts=None,

@@ -161,7 +161,7 @@ def test_an_ip_change_prints_the_ingest_gap_row_without_a_database(
         ]
     )
     assert code == ExitCode.REFUSED
-    assert "ingest_gap     venue=* metric=egress cause=egress_change" in output
+    assert "ingest_gap     venue=x metric=egress cause=egress_change" in output
     assert "ops_event      kind=preflight ok=False" in output
     assert ADDRESS not in output
 
