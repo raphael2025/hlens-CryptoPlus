@@ -9,11 +9,18 @@
 #     resident floor `reserve`, the fast-lane floor, the opportunistic hard cap;
 #   * WebSocket connection and seat limits.
 #
-# What deliberately does NOT live here: endpoint URLs and base hosts, the coin
-# list, and the symbol mapping (1000PEPE <-> kPEPE). Those belong to the venue
-# adapters — build steps ⑤/⑥ of M1-A — and writing them here would make the
-# ledger look like something that knows how to call a venue. It is not: it does
-# accounting and admission only, and never sends a request (§6.1, seam ③).
+# What deliberately does NOT live here: endpoint PATHS, the coin list, and the
+# symbol mapping (1000PEPE <-> kPEPE). Those belong to the venue adapters —
+# build steps ⑤/⑥ of M1-A — and writing them here would make the ledger look
+# like something that knows how to call a venue. It is not: it does accounting
+# and admission only, and never sends a request (§6.1, seam ③).
+#
+# Base HOSTS are the exception, added by M1-A5 under each venue's `endpoints:`
+# key. The original M1-A2 wording excluded them too, but `03 §6.1` requires
+# them here ("`config/venues.yaml` 里三个 base URL 分开配，标 `官方`") and
+# AGENTS §2.3 bans hard-coded hosts everywhere else. The ledger's loader does
+# not read that key — it ignores everything but `aimd` / `buckets` / `ws` — so
+# the ledger still cannot tell you where Binance is. See M1-A5's PR.
 #
 # Source tags
 #   official   — the venue's own documentation says so (docs/04 tag `官方`)
@@ -40,6 +47,47 @@ venues:
   # Binance USDⓈ-M futures
   # ------------------------------------------------------------------ #
   binance:
+    # ---------------------------------------------------------------- #
+    # Base URLs (M1-A5). This is the ONE exception to the "no endpoint
+    # URLs here" line in this file's header, and it is not this task's
+    # choice: `03 §6.1` says in as many words "`config/venues.yaml` 里三个
+    # base URL 分开配，标 `官方`", and AGENTS §2.3 bans hard-coded hosts
+    # anywhere else. The reason is the 2026-04-23 split: the legacy
+    # `wss://fstream.binance.com/stream` stopped pushing permanently and
+    # `!markPrice@arr` / `!forceOrder@arr` moved to the `/market` group
+    # (`04 §2`, `04 §13` 第 1 行). A host written into code is a host
+    # nobody re-checks the next time the venue moves it.
+    #
+    # Hosts only. The PATHS stay with the adapter
+    # (`adapters/binance/endpoints.py`), so this file still knows nothing
+    # about how to call a venue — it holds where the venue is, not what to
+    # ask it. The ledger does not read this block; the adapter does.
+    #
+    # `/private` is NOT here: `03 §3` designs this project without
+    # authentication, so no code path could use it. See the PR.
+    endpoints:
+      rest:
+        value: "https://fapi.binance.com"
+        source: official
+        doc: "04 §2：USDⓈ-M 合约 REST 主机"
+      rest_mirror:
+        value: "https://www.binance.com"
+        source: official
+        doc: >-
+          04 §2/§6：同路径镜像，美区出口下 `fapi` 返回 451 而它返回 200。
+          用不用由 preflight 按实测出口决定（04 §11 第 13 项），适配器不自己猜。
+      ws_market:
+        value: "wss://fstream.binance.com/market"
+        source: official
+        doc: >-
+          04 §2 变更公告（2026-04-23 生效）：`!markPrice@arr@1s` 与
+          `!forceOrder@arr` 都在 /market 组；legacy .../stream 已永久停推。
+      ws_public:
+        value: "wss://fstream.binance.com/public"
+        source: official
+        doc: >-
+          04 §2 变更公告：`@depth` / `@bookTicker` 在 /public 组。M1/M2 不连，
+          写在这里是因为两组永远不能共用一条连接，M4 不该重新发现这件事。
     aimd:
       # §6: "任何 429 让 opportunistic 停 1 小时，resident 只降速（AIMD 砍到 75%）".
       resident_factor_on_429:
