@@ -130,6 +130,13 @@ ban-relative-imports = "parents"
 # lifted inside each module's own directory, and only there. Add a line here
 # when a module grows, together with its row in ALLOWED_EDGES.
 "packages/hlens-core/src/hlens_core/ratelimit/*" = ["TID251"]
+# Same for the two module subpackages M1-A4 adds. `adapters/base.py` imports
+# `.capabilities` and `.symbols`; ruff resolves those to `hlens_core.adapters.*`
+# and matches the ban. Adding these two lines is NOT a change to the dependency
+# graph: ALLOWED_EDGES in tests/test_module_boundaries.py is untouched, and it
+# ignores `owner == target` before it checks anything.
+"packages/hlens-core/src/hlens_core/adapters/*" = ["TID251"]
+"packages/hlens-core/src/hlens_core/wallet/*" = ["TID251"]
 # A module's offline tests have to import the module they test. Tests are not
 # modules: they are not scanned by the boundary test (it walks `packages/`
 # only) and they write no table, so seam ③ has nothing to say about them.
@@ -148,4 +155,13 @@ strict = true
 # tests would mean either widening the read type (wrong: a validated record's
 # `mark` really is a Decimal) or making every adapter pre-convert. That is a
 # call for the adapter step, not for the scaffold; see the PR.
-files = ["packages"]
+files = ["packages", "tests/test_adapter_admission.py"]
+# That one test file is type-checked with the production code on purpose: it is
+# where seam ③'s dependency inversion is *proved*. It assigns a real
+# `RateLimitLedger` to the `SpendAuthority` protocol the adapters declare, and
+# that assignment is only evidence if a type checker looks at it — an
+# `isinstance` check against a runtime-checkable protocol compares method names
+# and would pass even with the wrong signatures. It is also where the
+# liquidation `full` demo lives: strict mode's `warn_unused_ignores` turns the
+# `# type: ignore[arg-type]` there into an error the moment `Completeness.FULL`
+# becomes writable. The rest of `tests/` stays out; see M1-A2's PR note 10.
