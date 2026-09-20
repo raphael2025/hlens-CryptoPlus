@@ -150,6 +150,20 @@ ban-relative-imports = "parents"
 # tests/test_module_boundaries.py is untouched by this task.
 "packages/hlens-core/src/hlens_core/adapters/hyperliquid/*" = ["TID251"]
 "packages/hlens-core/src/hlens_core/wallet/*" = ["TID251"]
+# M1-A3 adds `preflight/`. Same non-change as the lines above: its modules
+# import `hlens_core.preflight.{verdict,budget,...}`, which ruff resolves to
+# the banned dotted path even though `owner == target` and the boundary test
+# drops such edges before it checks anything. ALLOWED_EDGES is untouched by
+# this task.
+"packages/hlens-core/src/hlens_core/preflight/*" = ["TID251"]
+# The composition root (see its docstring). It is the ONE file allowed to name
+# `ratelimit`, `adapters` and `preflight` in the same import block, and it can
+# be that file precisely because it is not a module: it lives outside
+# `packages/`, so the boundary test — which walks `packages/` — does not see an
+# edge, because there is no module here to be the source of one. Seam ③ says
+# modules do not import each other; a composition root is not a module, and
+# wiring two of them together is what one is for.
+"scripts/*" = ["TID251"]
 # A module's offline tests have to import the module they test. Tests are not
 # modules: they are not scanned by the boundary test (it walks `packages/`
 # only) and they write no table, so seam ③ has nothing to say about them.
@@ -168,7 +182,7 @@ strict = true
 # tests would mean either widening the read type (wrong: a validated record's
 # `mark` really is a Decimal) or making every adapter pre-convert. That is a
 # call for the adapter step, not for the scaffold; see the PR.
-files = ["packages", "tests/test_adapter_admission.py"]
+files = ["packages", "scripts", "tests/test_adapter_admission.py", "tests/test_preflight_seam.py"]
 # That one test file is type-checked with the production code on purpose: it is
 # where seam ③'s dependency inversion is *proved*. It assigns a real
 # `RateLimitLedger` to the `SpendAuthority` protocol the adapters declare, and
@@ -178,3 +192,11 @@ files = ["packages", "tests/test_adapter_admission.py"]
 # liquidation `full` demo lives: strict mode's `warn_unused_ignores` turns the
 # `# type: ignore[arg-type]` there into an error the moment `Completeness.FULL`
 # becomes writable. The rest of `tests/` stays out; see M1-A2's PR note 10.
+#
+# M1-A3 adds two more paths for the same reason. `scripts/` holds the preflight
+# composition root, where `LedgerConfig.load` is assigned to preflight's
+# `BudgetLoader` and the two adapters' `CapabilitySet`s to `CapabilitySetView`:
+# those three assignments ARE the proof that seam ③'s dependency inversion
+# holds, and an unchecked assignment proves nothing.
+# `tests/test_preflight_seam.py` makes the same assignments member by member,
+# so that a drift says which property moved instead of only that something did.

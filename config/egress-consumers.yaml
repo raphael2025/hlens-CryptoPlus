@@ -21,6 +21,20 @@
 #   3. every number carries a source tag (official | measured | unverified |
 #      derived), same vocabulary as config/venues.yaml.
 #
+# THREE OPTIONAL KEYS THE LEDGER DOES NOT READ (added by M1-A3, preflight):
+#   `observed_max_per_min` · `self_cap_per_min` · `qualifiers: [...]`
+# The deduction is unaffected by them — the loader in
+# packages/hlens-core/src/hlens_core/ratelimit/config.py validates the keys it
+# needs and ignores annotations. They exist because `reserved_per_min` answers
+# "what does this consumer spend at p95" and preflight has to print the two
+# questions that answer does not touch: what is the highest minute anyone has
+# WATCHED, and what does this consumer ALLOW ITSELF. On Hyperliquid those two
+# numbers (1147 and 1200) are both above our entire 1080 ceiling, so a table
+# that printed only `reserved_per_min` would show a ledger that balances and
+# an egress that does not — which is exactly the ✓ that 03 §6.1 withdrew.
+# `qualifiers` carries the caveats forward so that anything derived from this
+# figure cannot print harder than it (AGENTS §2: derived 继承最弱的标签).
+#
 # The failure mode this file exists to prevent, in §6.1's own words: "它对不上
 # 现实时，错的方式是「我们以为有 960 权重其实没有」".
 #
@@ -148,6 +162,14 @@ consumers:
             was 1147/min, above our whole 1080 ceiling; its self-configured cap
             is 1200/min.
           doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §A"
+          # Preflight-only annotations (see the header). These are the two
+          # numbers the comment above says cannot be put in `reserved_per_min`:
+          # 1147 would refuse to load (> the 1080 ceiling) and that refusal is
+          # correct, but a table that never shows 1147 lets the reader believe
+          # 953 + 127 = 1080 describes the egress. It describes the ledger.
+          observed_max_per_min: 1147
+          self_cap_per_min: 1200
+          qualifiers: [sample_limited, lower_bound]
         # Seats, unlike weight, are indivisible and zero-sum (04 §4). §6.1 row 4
         # said "上机第一件事就是数", so M1-B counted: the collector is pure REST
         # against /info — no WebSocket client exists anywhere in its two runtime
@@ -212,6 +234,11 @@ consumers:
             because a 0 here was a false claim, not because it hurts.
           checked_by: preflight_each_start
           doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"
+          # Preflight-only: the highest single minute in 13,624 sampled
+          # minutes. No `self_cap_per_min` — that collector declares no
+          # self-limit anywhere, which is itself worth knowing and is why the
+          # key is absent rather than guessed.
+          observed_max_per_min: 122
         futures_data:
           # Four /futures/data/* ratio endpoints fired concurrently once per
           # 300 s for one symbol: 0 requests in four minutes out of five, 4 in
@@ -224,6 +251,9 @@ consumers:
             54 resident + 20 opportunistic cap = 74, plus this 4 = 78 of 80.
           checked_by: preflight_each_start
           doc: "docs/reports/2026-09-20-m1b-hub-inventory.md §C"
+          # Preflight-only: p95 and max are both 4 here (the four ratio
+          # endpoints fire together once per 300 s or not at all).
+          observed_max_per_min: 4
         funding_rate:
           # This one is genuinely 0, measured: the dev collector reads funding
           # through /fapi/v1/premiumIndex (charged to fapi_weight above), and

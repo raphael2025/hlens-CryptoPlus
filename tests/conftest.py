@@ -158,3 +158,28 @@ def hyperliquid_fixture_source(name: str) -> str:
     )
     source: str = document["source"]
     return source
+
+
+# --------------------------------------------------------------------------- #
+# M1-A3 — preflight's own fixtures
+# --------------------------------------------------------------------------- #
+PREFLIGHT_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "preflight"
+
+
+def preflight_fixture(name: str) -> tuple[int, Any]:
+    """One trimmed preflight fixture: ``(status_code, payload)``.
+
+    Hand-built from ``docs/04-DATA-SOURCES.md`` §2/§3/§6 and tagged ``source:
+    documented``. M1-A3 sent no request of any kind: this development machine
+    shares its public egress IP with the production host, and that egress
+    already carries a collector that is not ours (``03`` §8, M1-B), so a single
+    curiosity probe would spend the budget production is using. The 451 fixture
+    in particular could not have been recorded from here at all — it is what a
+    US egress sees (``04`` §6).
+    """
+    document = json.loads(
+        (PREFLIGHT_FIXTURES / f"{name}.json").read_text(encoding="utf-8")
+    )
+    assert document["source"] in {"documented", "live-recorded"}, document["source"]
+    status_code: int = document["status_code"]
+    return status_code, document["payload"]
