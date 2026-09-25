@@ -85,7 +85,7 @@ def test_long_pays_funding(cfg):
 
 def test_at_most_three_entries_per_thesis(cfg):
     closes, signals = [], []
-    for k in range(5):  # five dips to the stop, each preceded by a signal
+    for _ in range(5):  # five dips to the stop, each preceded by a signal
         base = len(closes)
         closes += [100, 96, 98, 99, 101, 90]
         signals.append(base + 3)

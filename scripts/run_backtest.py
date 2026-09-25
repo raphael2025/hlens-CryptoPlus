@@ -45,8 +45,9 @@ def main() -> None:
         sr_daily = ret.mean() / ret.std(ddof=1)
         results[v.name] = sr_daily
         print(f"\n=== {v.name} (config {cfg.version}) ===")
-        print(f"trades n={s['n']}  expectancy {s['expectancy_r']:+.3f}R  95% CI [{s['expectancy_ci'][0]:+.3f}, "
-              f"{s['expectancy_ci'][1]:+.3f}]  t={s['t']:+.2f}  total {s['total_r']:+.1f}R")
+        lo, hi = s["expectancy_ci"]
+        print(f"trades n={s['n']}  expectancy {s['expectancy_r']:+.3f}R  95% CI [{lo:+.3f}, {hi:+.3f}]  "
+              f"t={s['t']:+.2f}  total {s['total_r']:+.1f}R")
         print(f"win rate {fmt_pct(s['win_rate'])} CI {s['win_rate_ci']}  avg win {s['avg_win_r']:+.2f}R  "
               f"avg loss {s['avg_loss_r']:+.2f}R  skew {s['skew']:+.2f}  "
               f"top10% share of gross {fmt_pct(s['top10_share_of_gross'])}")
@@ -61,7 +62,8 @@ def main() -> None:
         print("exit reasons:", dict(trades.group_by("reason").len().iter_rows()))
         by_dir = trades.group_by("dir").agg(pl.len(), pl.col("r").mean().alias("mean_r"), pl.col("r").sum())
         print("by direction:", by_dir.sort("dir").rows())
-        print("by entry_no:", trades.group_by("entry_no").agg(pl.len(), pl.col("r").mean()).sort("entry_no").rows())
+        by_no = trades.group_by("entry_no").agg(pl.len(), pl.col("r").mean()).sort("entry_no")
+        print("by entry_no:", by_no.rows())
         hold = (trades["exit_time"] - trades["entry_time"]).dt.total_minutes() / 60
         print(f"holding hours median {hold.median():.1f}  mean {hold.mean():.1f}")
         for label, y0, y1 in YEARS:
