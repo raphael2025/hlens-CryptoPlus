@@ -1,0 +1,45 @@
+# V9 frozen parameters. Changing any value = new version (AGENTS.md §2.2).
+version: "9.0-core.1"
+
+data:
+  symbol: BTCUSDT
+  warmup_start: "2020-01-01"   # history used only to warm up indicators
+  dev_start: "2020-09-01"
+  holdout_start: "2024-01-01"  # dev set ends here (exclusive); holdout only in R8
+
+regime:                        # 4H, research plan §2
+  slow_bars: 180               # 30 days
+  fast_bars: 30                # 5 days
+  er_bars: 30
+  chop_quantile: 0.33
+  chop_lookback_bars: 2190     # 365 days
+  chop_min_bars: 1080          # 180 days; archive starts 2020-01, so the first months use < 1 year
+  transition_bars: 30
+
+structure:                     # 1H
+  atr_bars: 14
+  dc_atr_mult: 2.0
+
+execution:                     # 15m
+  atr_bars: 14
+  dc_atr_mult: 2.0
+  stop_buffer_atr1h: 0.25
+  max_stop_atr1h: 3.0
+
+risk:
+  risk_per_trade: 0.005
+  max_notional_x_equity: 3.0
+  max_entries_per_thesis: 3    # first entry + 2 re-entries (D1)
+
+exit:
+  reclaim_bars_1h: 3           # D2 core
+  trail_buffer_atr1h: 0.25     # not specified by the plan; set equal to the entry stop buffer
+
+costs:
+  taker_fee: 0.0005            # per side
+  slippage: 0.0002             # per side
+
+hypotheses:
+  h9_max_stage: 3
+  h10_q_min: 1.5
+  h10_depth_max: 0.618
