@@ -2,4 +2,4 @@
 description: hlens CryptoPlus repo rules
 alwaysApply: true
 ---
-Read and obey /AGENTS.md before any change. The repository holds documentation only until M1 builds the code. Take a task id from docs/PROGRESS.md; work on a branch feat/<task-id>-<slug>; never commit to main; no coding task starts before docs/03-ARCHITECTURE.md is confirmed. Rate limits are accounted per public egress IP with constants from config/venues.yaml; every network function gets an offline fixture test; no secrets in the repo; user-visible text describes state and never advises.
+Read and obey /AGENTS.md before any change. This repo is a BTC perpetual-futures trend-trading research project: docs/01-FRAMEWORK-V9.md is raphael's framework, docs/02-RESEARCH-PLAN.md holds the decisions, frozen v1 rules and task ids (R0–R9). Work on a branch feat/<task-id>-<slug>; never commit to main. No look-ahead (closed bars only, truncation-invariance test for every signal); parameters frozen in config/v9.yaml; the 2024+ holdout is touched only in R8; costs always on; every statistic reports n; no order placement or exchange keys; no secrets; data stays out of git.

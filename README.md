@@ -21,4 +21,5 @@ candidate and has not been validated.
 | Document | Contents |
 |---|---|
 | [`docs/01-FRAMEWORK-V9.md`](docs/01-FRAMEWORK-V9.md) | V9.0 candidate framework (raphael's prompts, consolidated) |
+| [`docs/02-RESEARCH-PLAN.md`](docs/02-RESEARCH-PLAN.md) | Decisions, frozen v1 rules, baselines, task order R0–R9, stop rules |
 | [`docs/reports/`](docs/reports/) | Evidence reviews and feasibility reports |

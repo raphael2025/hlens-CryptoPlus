@@ -354,7 +354,7 @@ Observation → Research Hypothesis → 历史样本 → 条件分层 → Backte
 
 ## 22. 交易状态
 
-`NO TRADE / WAIT / PREPARE / OPEN / HOLD / EXIT`，另有 `RE-ENTRY`（见 §23 第 1 项）。
+`NO TRADE / WAIT / PREPARE / OPEN / HOLD / EXIT`，另有 `RE-ENTRY`（见 §24 第 1 项）。
 
 ## 23. 实时分析压缩流程
 
@@ -381,7 +381,9 @@ Observation → Research Hypothesis → 历史样本 → 条件分层 → Backte
 【研究，而不是自动改规则】
 ```
 
-## 24. 各版本之间的出入（待 raphael 定，本文不代定）
+## 24. 各版本之间的出入
+
+已在 `docs/02-RESEARCH-PLAN.md` §1 定下：第 1 项见 D1，第 2 项见 D2，第 3 项见 D3。原问题保留如下：
 
 1. **交易状态数**：V9.0 列「六种」（NO TRADE / WAIT / PREPARE / OPEN / HOLD / EXIT），决策树 ⑥ 与持仓管理层有 RE-ENTRY。RE-ENTRY 是独立状态，还是从 EXIT / WAIT 回到 OPEN 的一条转换？
 2. **Thesis Invalidation / 真正危险的条件数**：V9.0 列 5 条（结构破坏 + Acceptance + Reclaim 失败 + 对手新仓 + Price Impact 有效），持仓逻辑列 7 条（另加 Volume↑、ATR↑）。以哪一版为准，是「全部满足」还是「满足 k 条」？
