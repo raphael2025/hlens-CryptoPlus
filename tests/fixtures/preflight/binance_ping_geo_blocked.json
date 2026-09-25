@@ -1,9 +1,0 @@
-{
-  "source": "documented",
-  "note": "docs/04-DATA-SOURCES.md §6: from a US egress `fapi.binance.com` answers 451 while the same path under the mirror host answers 200 — an application-layer geographic refusal, not a network failure. The body shape is Binance's standard error envelope (04 §2); the code is not quoted in any document, so the test asserts on the status only. Hand-built, documented, never recorded.",
-  "status_code": 451,
-  "payload": {
-    "code": -1,
-    "msg": "Service unavailable from a restricted location"
-  }
-}
