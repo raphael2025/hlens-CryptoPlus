@@ -1,5 +1,5 @@
 # V9 frozen parameters. Changing any value = new version (AGENTS.md §2.2).
-version: "9.1-trader.1"   # 9.0-core.1 sections below are unchanged
+version: "9.2-swing.1"   # earlier sections unchanged
 
 data:
   symbol: BTCUSDT
@@ -69,3 +69,20 @@ entry_study:
   passage_window_h: 72
   random_samples: 20000
   seed: 0
+
+swing:                         # research plan §9, fixed before any result
+  fast_drop_bars: 8            # 15m bars
+  fast_drop_atr1h: 3.0
+  level_touch_atr1h: 0.25
+  wick_frac: 0.5
+  cooldown_bars: 8
+  stop_buffer_atr1h: 0.25      # S1
+  key_break_atr1h: 0.5         # S2
+  key_reclaim_bars_1h: 2       # S2
+  catastrophe_atr1h: 3.0       # S2 intrabar hard stop below the key level
+  swing_min_mfe_r: 1.0         # E2
+  strong_spread_bars_4h: 6     # E3
+  fixed_target_r: 3.0          # E4
+  trail_buffer_atr1h: 0.25     # E1
+  max_hold_days: 14
+  random_seeds: 20

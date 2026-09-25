@@ -104,6 +104,25 @@ class EntryStudy:
 
 
 @dataclass(frozen=True)
+class Swing:
+    fast_drop_bars: int
+    fast_drop_atr1h: float
+    level_touch_atr1h: float
+    wick_frac: float
+    cooldown_bars: int
+    stop_buffer_atr1h: float
+    key_break_atr1h: float
+    key_reclaim_bars_1h: int
+    catastrophe_atr1h: float
+    swing_min_mfe_r: float
+    strong_spread_bars_4h: int
+    fixed_target_r: float
+    trail_buffer_atr1h: float
+    max_hold_days: int
+    random_seeds: int
+
+
+@dataclass(frozen=True)
 class Config:
     version: str
     data: Data
@@ -117,6 +136,7 @@ class Config:
     baselines: Baselines
     trader: Trader
     entry_study: EntryStudy
+    swing: Swing
 
 
 def _build(cls, raw: dict):
@@ -148,4 +168,5 @@ def load_config(path: Path = DEFAULT_CONFIG) -> Config:
         baselines=_build(Baselines, raw["baselines"]),
         trader=_build(Trader, raw["trader"]),
         entry_study=_build(EntryStudy, raw["entry_study"]),
+        swing=_build(Swing, raw["swing"]),
     )
