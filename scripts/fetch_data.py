@@ -37,7 +37,11 @@ def fetch_extra_klines(symbols: list[str], end: str) -> None:
         urls = [bn.kline_url("um", sym, "15m", mo) for mo in ms]
         paths, missing = fetch_all(urls, RAW / f"um/klines/15m/{sym}")
         build_bars(paths, 15).write_parquet(PROCESSED / f"um_15m_{sym}.parquet")
-        print(f"{sym}: {len(paths)} files, {len(missing)} missing (months before listing are expected)")
+        fpaths, fmissing = fetch_all([bn.funding_url(sym, mo) for mo in ms], RAW / f"um/fundingRate/{sym}")
+        pl.concat([bn.parse_funding(p) for p in fpaths]).unique("time").sort("time").write_parquet(
+            PROCESSED / f"funding_{sym}.parquet")
+        print(f"{sym}: klines {len(paths)} files ({len(missing)} missing), "
+              f"funding {len(fpaths)} files ({len(fmissing)} missing); months before listing are expected")
 
 
 def main() -> None:
@@ -46,7 +50,7 @@ def main() -> None:
     last_month = (now.replace(day=1) - timedelta(days=1))
     ap.add_argument("--end", default=f"{last_month.year:04d}-{last_month.month:02d}")
     ap.add_argument("--klines-only", nargs="+", metavar="SYMBOL",
-                    help="only fetch USD-M 15m klines for these extra symbols (T1b)")
+                    help="only fetch USD-M 15m klines and funding for these extra symbols (T1b, T3)")
     args = ap.parse_args()
     if args.klines_only:
         fetch_extra_klines(args.klines_only, args.end)
