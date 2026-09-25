@@ -48,3 +48,10 @@ def test_months_and_urls():
     assert bn.months(date(2020, 11, 1), date(2021, 2, 1)) == ["2020-11", "2020-12", "2021-01", "2021-02"]
     assert bn.kline_url("um", "BTCUSDT", "15m", "2020-01").endswith(
         "futures/um/monthly/klines/BTCUSDT/15m/BTCUSDT-15m-2020-01.zip")
+
+
+def test_metrics_empty_fields_become_null(tmp_path):
+    text = (",".join(bn.METRIC_COLUMNS) + "\n"
+            "2021-01-01 00:05:00,BTCUSDT,39080.231,456144339.2,,,,\n")
+    df = bn.parse_metrics(_zip(tmp_path, "m", text))
+    assert df["oi"][0] > 0 and df["top_account_ratio"][0] is None

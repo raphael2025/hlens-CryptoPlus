@@ -1,7 +1,10 @@
 """Binance public archive (data.binance.vision): URL building, checksum-verified download, parsing."""
 
 import hashlib
+import http.client
 import io
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from datetime import date
@@ -43,9 +46,19 @@ def months(start: date, end_inclusive: date) -> list[str]:
     return out
 
 
-def _get(url: str, timeout: float = 60) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read()
+def _get(url: str, timeout: float = 60, attempts: int = 5) -> bytes:
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404 or i == attempts - 1:
+                raise
+        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError, ConnectionError):
+            if i == attempts - 1:
+                raise
+        time.sleep(2 ** (i + 1))
+    raise AssertionError("unreachable")
 
 
 def download(url: str, dest_dir: Path) -> Path | None:
@@ -80,7 +93,7 @@ def _csv_text(path: Path) -> str:
 
 def _read_csv(text: str, columns: list[str]) -> pl.DataFrame:
     first = text.split("\n", 1)[0]
-    has_header = not first[:1].isdigit() and not first[:1] == "-"
+    has_header = not first[:1].isdigit() and first[:1] != "-"
     return pl.read_csv(io.StringIO(text), has_header=has_header, new_columns=columns,
                        infer_schema_length=0)
 
@@ -108,7 +121,8 @@ def parse_funding(path: Path) -> pl.DataFrame:
     # calc_time is occasionally 1 ms past the settlement instant; snap to the minute
     t = pl.col("calc_time").cast(pl.Int64)
     return df.select(
-        pl.from_epoch((t + 30_000) // 60_000 * 60_000, time_unit="ms").dt.replace_time_zone("UTC").alias("time"),
+        pl.from_epoch((t + 30_000) // 60_000 * 60_000, time_unit="ms")
+        .dt.replace_time_zone("UTC").alias("time"),
         pl.col("funding_interval_hours").cast(pl.Int64).alias("interval_hours"),
         pl.col("last_funding_rate").cast(pl.Float64).alias("rate"),
     )
@@ -122,15 +136,21 @@ METRIC_COLUMNS = [
 
 
 def parse_metrics(path: Path) -> pl.DataFrame:
+    """Some archive days have empty ratio fields; those become null (counted in the QA report)."""
     df = _read_csv(_csv_text(path), METRIC_COLUMNS)
+
+    def num(c: str) -> pl.Expr:
+        return pl.col(c).replace("", None).cast(pl.Float64)
+
     return df.select(
-        pl.col("create_time").str.to_datetime("%Y-%m-%d %H:%M:%S", time_zone="UTC", time_unit="ms").alias("time"),
-        pl.col("sum_open_interest").cast(pl.Float64).alias("oi"),
-        pl.col("sum_open_interest_value").cast(pl.Float64).alias("oi_value"),
-        pl.col("count_toptrader_long_short_ratio").cast(pl.Float64).alias("top_account_ratio"),
-        pl.col("sum_toptrader_long_short_ratio").cast(pl.Float64).alias("top_position_ratio"),
-        pl.col("count_long_short_ratio").cast(pl.Float64).alias("global_account_ratio"),
-        pl.col("sum_taker_long_short_vol_ratio").cast(pl.Float64).alias("taker_ratio"),
+        pl.col("create_time").str.to_datetime("%Y-%m-%d %H:%M:%S", time_zone="UTC", time_unit="ms")
+        .alias("time"),
+        num("sum_open_interest").alias("oi"),
+        num("sum_open_interest_value").alias("oi_value"),
+        num("count_toptrader_long_short_ratio").alias("top_account_ratio"),
+        num("sum_toptrader_long_short_ratio").alias("top_position_ratio"),
+        num("count_long_short_ratio").alias("global_account_ratio"),
+        num("sum_taker_long_short_vol_ratio").alias("taker_ratio"),
     )
 
 
