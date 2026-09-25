@@ -11,5 +11,14 @@ this repo (branching, no secrets, offline tests, etc.) — those still apply
 once design work resumes. Role definitions for specialized agents live in
 [`.claude/agents/`](.claude/agents/).
 
-New product, feature, architecture and data-source documents will be added
-under `docs/` as the redesign proceeds.
+## Current direction
+
+A research framework for BTC perpetual-futures trend trading: 4H regime gate,
+1H trade state, 15m execution, with spot/futures flow, open interest,
+liquidations and positioning used as evidence layers. The framework is a
+candidate and has not been validated.
+
+| Document | Contents |
+|---|---|
+| [`docs/01-FRAMEWORK-V9.md`](docs/01-FRAMEWORK-V9.md) | V9.0 candidate framework (raphael's prompts, consolidated) |
+| [`docs/reports/`](docs/reports/) | Evidence reviews and feasibility reports |
