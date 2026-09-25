@@ -72,6 +72,14 @@ class Hypotheses:
 
 
 @dataclass(frozen=True)
+class Baselines:
+    ma_windows: list[int]
+    vol_window: int
+    vol_target: float
+    max_leverage: float
+
+
+@dataclass(frozen=True)
 class Config:
     version: str
     data: Data
@@ -82,6 +90,7 @@ class Config:
     exit: Exit
     costs: Costs
     hypotheses: Hypotheses
+    baselines: Baselines
 
 
 def _build(cls, raw: dict):
@@ -110,4 +119,5 @@ def load_config(path: Path = DEFAULT_CONFIG) -> Config:
         exit=_build(Exit, raw["exit"]),
         costs=_build(Costs, raw["costs"]),
         hypotheses=_build(Hypotheses, raw["hypotheses"]),
+        baselines=_build(Baselines, raw["baselines"]),
     )

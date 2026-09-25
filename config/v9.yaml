@@ -43,3 +43,9 @@ hypotheses:
   h9_max_stage: 3
   h10_q_min: 1.5
   h10_depth_max: 0.618
+
+baselines:                     # B0 / B1 (research plan §3); fixed before any result was computed
+  ma_windows: [20, 50, 100]    # days, all reported
+  vol_window: 20               # days
+  vol_target: 0.5              # annualised
+  max_leverage: 2.0
