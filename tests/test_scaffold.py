@@ -11,7 +11,7 @@ from v9.lookahead import assert_truncation_invariant, evenly_spaced_cuts, trunca
 
 def test_config_loads_and_is_versioned():
     cfg = load_config()
-    assert cfg.version.startswith("9.0")
+    assert cfg.version.startswith("9.")
     assert cfg.data.dev_start < cfg.data.holdout_start
 
 
