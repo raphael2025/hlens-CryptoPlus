@@ -1,5 +1,5 @@
 # V9 frozen parameters. Changing any value = new version (AGENTS.md §2.2).
-version: "9.0-core.1"
+version: "9.1-trader.1"   # 9.0-core.1 sections below are unchanged
 
 data:
   symbol: BTCUSDT
@@ -49,3 +49,23 @@ baselines:                     # B0 / B1 (research plan §3); fixed before any r
   vol_window: 20               # days
   vol_target: 0.5              # annualised
   max_leverage: 2.0
+
+trader:                        # research plan §7, fixed before any result
+  ema_4h: [9, 21, 55, 200]
+  vegas_filter: 12
+  vegas_a: [144, 169]
+  atr_bars: 14
+  chop_ema_gap_atr4h: 0.5
+  pullback_4h_bars: 3
+  pullback_1h_bars: 4
+  tunnel_touch_atr1h: 0.5
+  sweep_reclaim_bars: 4        # 15m bars
+  choch_window_bars: 16        # 15m bars after the sweep
+  stop_buffer_atr1h: 0.25
+
+entry_study:
+  horizons_h: [4, 24, 72]
+  passage_r: [2, 3]
+  passage_window_h: 72
+  random_samples: 20000
+  seed: 0

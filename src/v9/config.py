@@ -80,6 +80,30 @@ class Baselines:
 
 
 @dataclass(frozen=True)
+class Trader:
+    ema_4h: list[int]
+    vegas_filter: int
+    vegas_a: list[int]
+    atr_bars: int
+    chop_ema_gap_atr4h: float
+    pullback_4h_bars: int
+    pullback_1h_bars: int
+    tunnel_touch_atr1h: float
+    sweep_reclaim_bars: int
+    choch_window_bars: int
+    stop_buffer_atr1h: float
+
+
+@dataclass(frozen=True)
+class EntryStudy:
+    horizons_h: list[int]
+    passage_r: list[int]
+    passage_window_h: int
+    random_samples: int
+    seed: int
+
+
+@dataclass(frozen=True)
 class Config:
     version: str
     data: Data
@@ -91,6 +115,8 @@ class Config:
     costs: Costs
     hypotheses: Hypotheses
     baselines: Baselines
+    trader: Trader
+    entry_study: EntryStudy
 
 
 def _build(cls, raw: dict):
@@ -120,4 +146,6 @@ def load_config(path: Path = DEFAULT_CONFIG) -> Config:
         costs=_build(Costs, raw["costs"]),
         hypotheses=_build(Hypotheses, raw["hypotheses"]),
         baselines=_build(Baselines, raw["baselines"]),
+        trader=_build(Trader, raw["trader"]),
+        entry_study=_build(EntryStudy, raw["entry_study"]),
     )
