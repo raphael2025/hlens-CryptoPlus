@@ -12,14 +12,11 @@ PROCESSED = ROOT / "data" / "processed"
 DATASETS = ("um_15m", "spot_15m", "premium_1h", "funding", "metrics")
 
 
-class HoldoutError(RuntimeError):
-    pass
-
-
-def path(name: str, base: Path = PROCESSED) -> Path:
+def path(name: str, base: Path = PROCESSED, symbol: str | None = None) -> Path:
+    """The configured symbol keeps the plain file name; other symbols get a suffix."""
     if name not in DATASETS:
         raise KeyError(name)
-    return base / f"{name}.parquet"
+    return base / (f"{name}.parquet" if symbol is None else f"{name}_{symbol}.parquet")
 
 
 def restrict(df: pl.DataFrame, cfg: Config, *, allow_holdout: bool) -> pl.DataFrame:
@@ -39,8 +36,9 @@ def restrict(df: pl.DataFrame, cfg: Config, *, allow_holdout: bool) -> pl.DataFr
     return df
 
 
-def load(name: str, cfg: Config, *, allow_holdout: bool = False, base: Path = PROCESSED) -> pl.DataFrame:
-    p = path(name, base)
+def load(name: str, cfg: Config, *, allow_holdout: bool = False, base: Path = PROCESSED,
+         symbol: str | None = None) -> pl.DataFrame:
+    p = path(name, base, None if symbol in (None, cfg.data.symbol) else symbol)
     if not p.exists():
         raise FileNotFoundError(f"{p} missing; run `uv run python scripts/fetch_data.py` first")
     return restrict(pl.read_parquet(p), cfg, allow_holdout=allow_holdout)

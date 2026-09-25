@@ -29,12 +29,28 @@ def build_bars(paths, interval_minutes: int) -> pl.DataFrame:
     return df.with_columns((pl.col("open_time") + timedelta(minutes=interval_minutes)).alias("close_time"))
 
 
+def fetch_extra_klines(symbols: list[str], end: str) -> None:
+    cfg = load_config()
+    y, m = map(int, end.split("-"))
+    ms = bn.months(cfg.data.warmup_start.date(), date(y, m, 1))
+    for sym in symbols:
+        urls = [bn.kline_url("um", sym, "15m", mo) for mo in ms]
+        paths, missing = fetch_all(urls, RAW / f"um/klines/15m/{sym}")
+        build_bars(paths, 15).write_parquet(PROCESSED / f"um_15m_{sym}.parquet")
+        print(f"{sym}: {len(paths)} files, {len(missing)} missing (months before listing are expected)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     now = datetime.now(UTC).date()
     last_month = (now.replace(day=1) - timedelta(days=1))
     ap.add_argument("--end", default=f"{last_month.year:04d}-{last_month.month:02d}")
+    ap.add_argument("--klines-only", nargs="+", metavar="SYMBOL",
+                    help="only fetch USD-M 15m klines for these extra symbols (T1b)")
     args = ap.parse_args()
+    if args.klines_only:
+        fetch_extra_klines(args.klines_only, args.end)
+        return
 
     cfg = load_config()
     sym = cfg.data.symbol

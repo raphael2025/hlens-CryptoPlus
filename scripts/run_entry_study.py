@@ -9,19 +9,8 @@ import polars as pl
 from v9 import stats
 from v9.config import ROOT, load_config
 from v9.data.store import load
-from v9.entry_study import diff_ci, forward_metrics
+from v9.entry_study import diff_ci, measure
 from v9.trader import build_trader_frame, find_signals
-
-
-def measure(rows, o, h, lo, c, cfg):
-    es = cfg.entry_study
-    out = []
-    for bar, d, risk, a1 in rows:
-        m = forward_metrics(o, h, lo, c, bar + 1, d, risk, a1,
-                            es.horizons_h, es.passage_r, es.passage_window_h)
-        if m is not None:
-            out.append({"bar": bar, "dir": d, "risk_atr": risk / a1, **m})
-    return pl.DataFrame(out)
 
 
 def summarize(name: str, m: pl.DataFrame, cfg) -> dict:
@@ -61,7 +50,7 @@ def main() -> None:
     groups = {}
     for name, s in (("E-no4hpb", sig), ("E-full", sig.filter(pl.col("pullback_4h")))):
         rows = list(zip(s["bar"], s["dir"], s["risk"], s["atr_1h"], strict=True))
-        groups[name] = measure(rows, o, h, lo, c, cfg)
+        groups[name] = measure(rows, o, h, lo, c, cfg.entry_study)
     med_risk_atr = float(np.median(groups["E-no4hpb"]["risk_atr"]))
     cost_r = 2 * (cfg.costs.taker_fee + cfg.costs.slippage) * np.median(entry_open) / np.median(
         sig["risk"].to_numpy())
@@ -76,7 +65,7 @@ def main() -> None:
     for name, pool in pools.items():
         pick = rng.choice(pool, size=es.random_samples, replace=True)
         rows = [(int(j), int(d4[j]), med_risk_atr * a1[j], a1[j]) for j in pick]
-        groups[name] = measure(rows, o, h, lo, c, cfg)
+        groups[name] = measure(rows, o, h, lo, c, cfg.entry_study)
 
     print("\n## entry quality (dev set, before costs)")
     res = {k: summarize(k, v, cfg) for k, v in groups.items()}

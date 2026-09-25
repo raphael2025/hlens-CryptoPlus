@@ -2,6 +2,7 @@
 they measure what happened after each entry, they are never inputs to a signal."""
 
 import numpy as np
+import polars as pl
 
 BARS_PER_HOUR = 4
 
@@ -34,3 +35,14 @@ def forward_metrics(o, h, lo, c, entry_bar: int, d: int, risk: float, atr_1h: fl
 def diff_ci(p1: float, n1: int, p2: float, n2: int, z: float = 1.96):
     se = np.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
     return p1 - p2, p1 - p2 - z * se, p1 - p2 + z * se
+
+
+def measure(rows, o, h, lo, c, study) -> pl.DataFrame:
+    """rows: (signal_bar, dir, risk_price, atr_1h); entry is the open after the signal bar."""
+    out = []
+    for bar, d, risk, a1 in rows:
+        m = forward_metrics(o, h, lo, c, bar + 1, d, risk, a1,
+                            study.horizons_h, study.passage_r, study.passage_window_h)
+        if m is not None:
+            out.append({"bar": bar, "dir": d, "risk_atr": risk / a1, **m})
+    return pl.DataFrame(out)
