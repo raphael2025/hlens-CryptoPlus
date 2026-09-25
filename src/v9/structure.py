@@ -49,8 +49,8 @@ def structure_1h(bars15: pl.DataFrame, cfg: Config) -> pl.DataFrame:
         "ext": sw.ext,
         "swing_high": sw.sh,
         "swing_low": sw.sl,
-        "new_swing_high": np.concatenate([[False], sw.sh_idx[1:] != sw.sh_idx[:-1]]),
-        "new_swing_low": np.concatenate([[False], sw.sl_idx[1:] != sw.sl_idx[:-1]]),
+        "swing_high_idx": sw.sh_idx,
+        "swing_low_idx": sw.sl_idx,
         "q": q,
         "depth": depth,
     }).with_columns(pl.when(pl.col("setup") != 0).then(pl.col("leg_start")).alias("leg_start"))
