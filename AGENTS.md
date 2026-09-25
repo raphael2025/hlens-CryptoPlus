@@ -1,6 +1,6 @@
 # AGENTS.md — rules for any coding agent (Cursor, Codex, Claude) working in this repo
 
-Read this before touching anything. Task tracking lives in `docs/PROGRESS.md`; take a task id from there (M1 ids are letters — `M1-A` … `M1-J`, matching `docs/03-ARCHITECTURE.md` build order) and put it in your branch name and PR title. **The repository currently contains documentation only — there is no code yet. M1 builds it from nothing.**
+Read this before touching anything. **The repository was reset by raphael's decision on 2026-09-25: the previous product, feature, architecture and data-source documents and everything built against them were removed. The design is starting over from nothing — no docs, no code.** Once new design documents exist under `docs/`, task tracking will live in `docs/PROGRESS.md` as before; take a task id from there and put it in your branch name and PR title.
 
 ## 1. What this project is
 hlens CryptoPlus reports the *state* of a crypto perpetual market (who is long, who is crowded, where liquidations sit) across Binance and Hyperliquid, and never gives entry/exit advice. Read, in this order:
